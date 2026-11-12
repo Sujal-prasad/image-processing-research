@@ -1,0 +1,6 @@
+# Steps 8-9: BatchNorm check (3 short runs) + baseline seed 0. Run this queue first.
+jobs:
+  - {config: configs/checks/bn_micro1.yaml, seeds: [0]}
+  - {config: configs/checks/bn_micro4.yaml, seeds: [0]}
+  - {config: configs/checks/bn_stock4.yaml, seeds: [0]}
+  - {config: configs/baseline.yaml, seeds: [0]}

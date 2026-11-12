@@ -1,0 +1,9 @@
+# Step 10: main BSDS rows. order: seed_major runs every config with seed 0 first, then seed 1, then seed 2,
+# so a complete (single-seed) comparison exists as early as possible. Minimum for the paper: seeds 0 and 1.
+order: seed_major
+jobs:
+  - {config: configs/baseline.yaml, seeds: [0, 1, 2]}
+  - {config: configs/A_agree.yaml, seeds: [0, 1, 2]}
+  - {config: configs/A_uniform.yaml, seeds: [0, 1, 2]}
+  - {config: configs/B_uniform.yaml, seeds: [0, 1, 2]}
+  - {config: configs/B_agree.yaml, seeds: [0, 1, 2]}

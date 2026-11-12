@@ -58,30 +58,65 @@ schedule). It never mixes settings in one table and shows published numbers (†
 - **Main-row comparison for H2:** `A_uniform` (α = 1 − η everywhere) vs `A_agree` (α from agreement). Same teachers, same everything else.
 - With agreement-based α, pixels where **all** annotators agree on "no edge" get α = 1, so the teachers never add edges there. `A_uniform` and Variant B cover that case.
 
-## Kaggle workflow
+## Running it on Kaggle, step by step
 
-1. Push this repo to GitHub (set `REPO_URL` in the notebooks), or upload it as the Dataset `pedger-mtkd-code`.
-2. `01_eval_setup` (CPU): download BSDS500, build the store, run step 1. Save the output as Dataset `pedger-data`.
-3. `03_cache_teachers` (GPU, once). Save as `pedger-teachers`.
-4. `04_baseline_and_checks` (GPU): timing → BatchNorm check → baseline.
-5. `05_train` (GPU): one config + seed per session. `--max-hours 11.5` stops cleanly; the same command resumes from `last.pt`.
-6. `06_evaluate` (CPU, no GPU quota): scores, tables, agreement bins, efficiency.
+**How unattended training works.** All state lives in one private Hugging Face dataset repo
+(`HF_REPO`): data stores, teacher cache, checkpoints, scores, and a copy of the code. Every notebook is run
+with **Save Version → Save & Run All (Commit)**, so it runs on Kaggle's servers (the laptop can be off) for
+up to 12 h. Training checkpoints every 30 min and at every epoch end, uploads in the background, stops cleanly
+before the 12 h limit, and resumes **exactly** where it stopped (tested bit-identical across 5 interruptions).
+A queue (`queues/*.yaml`) plus a heartbeat lock lets any session on **any Kaggle account** with the same
+`HF_REPO` and an `HF_TOKEN` secret take the next unfinished job. A crash or quota cut-off loses at most
+30 min; that job becomes claimable again after 75 min without a heartbeat.
+
+### One-time setup
+1. **Hugging Face:** settings → Access Tokens → *New token*, type **Write**. Delete any token that was shared in
+   plain text. The private repo `HF_REPO` is created automatically on first use.
+2. **Each Kaggle account** (phone-verified, so Internet and GPU are available):
+   *Add-ons → Secrets → Add* `HF_TOKEN` = the write token. Kaggle's terms allow one account per person,
+   so use accounts that belong to different team members.
+3. **Notebooks:** on kaggle.com → *Create → Notebook → File → Import notebook*, import each file from
+   `notebooks/`. In each: tick the `HF_TOKEN` secret (Add-ons → Secrets), *Settings → Internet: On*,
+   accelerator as written in the notebook title. Only the first cell has settings (`HF_REPO`, `ACCOUNT`).
+4. **Code:** already on HF under `code/` (the notebooks fetch it from there). After changing code, push it
+   again with `python -m pedger_kd.sync --remote hf:<HF_REPO> push-code`, or upload
+   `dist/pedger-mtkd-code.zip` (`tools/make_code_zip.py`) as a Kaggle Dataset and attach it. An attached copy
+   takes precedence.
+
+### Running order (each = *Save Version → Save & Run All*; check results in the version's log/output)
+| # | Notebook | Accelerator | Done when |
+|---|---|---|---|
+| 1 | `01_data_and_eval_setup` | None | Released-checkpoint table in the log; one mode within ±0.002 of the paper (step 1 gate). Set `eval.deploy` in `configs/base.yaml` if it's not `ns_m`. |
+| 2 | `03_teacher_cache` | GPU T4 x1 | Log prints the alignment picture and the caching GPU-hours. If it timed out, run again (finished teachers are skipped). |
+| 3 | `04_timing_and_checks` | GPU T4 x2 | `timing/baseline.json` gives hours per run; `status` shows `bn_micro1/4`, `bn_stock4`, `baseline_s0` done (re-run until then). |
+| 4 | `06_evaluate` | None | BatchNorm check PASS; baseline score vs published (step 8 gate). |
+| 5 | `05_train_queue` with `QUEUE = "queues/main.yaml"` | GPU T4 x2 | Re-run (same or another account) until all 15 jobs are done. |
+| 6 | `05_train_queue` with `queues/ablations.yaml` | GPU T4 x2 | 24 short jobs done. |
+| 7 | `02_more_datasets`, then `03` steps for NYUD/MultiCue, then `05` with `queues/nyud.yaml` / `queues/multicue.yaml` | | |
+| 8 | `06_evaluate` | None | `results/tables.md`, `agreement_bins.json`, `efficiency.json` on HF. |
+
+**Check progress any time** (from a notebook or a laptop with `huggingface_hub`):
+`python -m pedger_kd.sync --remote hf:<HF_REPO> status`, or open `runs/<run>/progress.json` on the HF repo page.
+Never start two sessions on the same queue within ~2 minutes of each other (claims are staggered, not atomic).
+`--take-over` forces a claim if you are sure the other session is dead.
 
 ## Repository map
 
 ```
 pedger_kd/   upstream.py (loads official PEdger)  norm.py (per-image BN)  augment.py  data.py
              agreement.py  soft_target.py (Variant A)  kd_loss.py (Variant B)  losses.py
-             train_kd.py  inference.py  evaluation.py  config.py  teachers.py
+             train_kd.py (resumable trainer)  jobs.py (queue runner)  sync.py (HF remote)
+             inference.py  evaluation.py  config.py  teachers.py
+queues/      checks.yaml  main.yaml  ablations.yaml  nyud.yaml  multicue.yaml
 data/        prepare_bsds.py  prepare_list.py  make_multicue_splits.py  visualize_samples.py
-teachers/    export_images.py  run_sauge.py  run_muge.py  pack_cache.py  ensemble.py  teacher_gate.py
-eval/        run_bsds_eval.py  bn_check.py  agreement_bins.py
+teachers/    export_images.py  run_sauge.py  run_muge.py  pack_cache.py  ensemble.py  subset_cache.py  teacher_gate.py
+eval/        run_bsds_eval.py  eval_runs.py (score all finished runs)  bn_check.py  agreement_bins.py
 bench/       time_run.py  speed_flops.py
 results/     make_tables.py  published.yaml
 configs/     base.yaml + main rows, ablations/, checks/, nyud/, multicue/  (generated by tools/make_configs.py)
 notebooks/   01-06 Kaggle notebooks (generated by tools/make_notebooks.py)
 tests/       sanity tests, equivalence tests, augmentation alignment, data prep, end-to-end smoke test
-tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks.py
+tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks.py  make_code_zip.py
 ```
 
 ## Local setup
@@ -89,7 +124,7 @@ tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks
 ```
 python tools/fetch_upstream.py          # official PEdger at the pinned commit
 pip install -r requirements.txt
-pytest tests                            # 68 tests, CPU, ~2 minutes
+pytest tests                            # 74 tests, CPU, ~4 minutes
 ```
 `pyEdgeEval` builds a C++ extension. It installs out of the box on Kaggle/Linux; on Windows it needs
 the MSVC build tools. Everything except benchmark scoring runs without it.

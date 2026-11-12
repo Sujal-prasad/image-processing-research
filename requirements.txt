@@ -8,6 +8,7 @@ pyyaml
 opencv-python-headless
 tqdm
 pytest
+huggingface_hub>=0.25         # remote storage (checkpoints, data, code) shared across Kaggle accounts
 
 # Evaluation (BSDS benchmark port; builds a Cython extension, works on Kaggle/Linux)
 pyEdgeEval==0.2.8

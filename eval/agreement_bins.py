@@ -98,7 +98,10 @@ def main():
     for spec in args.run:
         label, path = spec.split("=", 1)
         sc = json.load(open(path))
-        result[label] = run_bins(sc["pred_dir"], sc["ODS_threshold"], items, meta["max_dist"], args.nproc)
+        pred_dir = Path(sc["pred_dir"])
+        if not pred_dir.exists():   # scored in another session: predictions were pulled next to the scores
+            pred_dir = Path(path).parent / ("pred_" + Path(path).stem[len("scores_"):])
+        result[label] = run_bins(pred_dir, sc["ODS_threshold"], items, meta["max_dist"], args.nproc)
         result[label]["_ODS"] = sc["ODS"]
     print(f"{'bin':8s}" + "".join(f"{lab + ' R':>14s}{lab + ' P':>14s}" for lab in result))
     for k in list(BINS) + ["none"]:

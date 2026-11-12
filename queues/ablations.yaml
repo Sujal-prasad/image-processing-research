@@ -1,0 +1,27 @@
+# Step 11: ablations, 1 seed, short schedule (dev split; scored on val).
+# The short_check/full_check pairs verify that short runs rank methods like full runs.
+jobs:
+  - {config: configs/ablations/short_check_baseline.yaml, seeds: [0]}
+  - {config: configs/ablations/short_check_B_uniform.yaml, seeds: [0]}
+  - {config: configs/ablations/short_check_A_agree.yaml, seeds: [0]}
+  - {config: configs/ablations/teacher_sauge.yaml, seeds: [0]}
+  - {config: configs/ablations/teacher_muge.yaml, seeds: [0]}
+  - {config: configs/ablations/teacher_memo.yaml, seeds: [0]}
+  - {config: configs/ablations/teacher_ensemble_mean.yaml, seeds: [0]}
+  - {config: configs/ablations/teacher_ensemble_conf.yaml, seeds: [0]}
+  - {config: configs/ablations/gamma_0.yaml, seeds: [0]}
+  - {config: configs/ablations/gamma_1.yaml, seeds: [0]}
+  - {config: configs/ablations/gamma_conf.yaml, seeds: [0]}
+  - {config: configs/ablations/no_ramp.yaml, seeds: [0]}
+  - {config: configs/ablations/alpha_min_0.yaml, seeds: [0]}
+  - {config: configs/ablations/alpha_min_0.3.yaml, seeds: [0]}
+  - {config: configs/ablations/dilation_1.yaml, seeds: [0]}
+  - {config: configs/ablations/dilation_2.yaml, seeds: [0]}
+  - {config: configs/ablations/B_lambda_0.5.yaml, seeds: [0]}
+  - {config: configs/ablations/B_lambda_2.yaml, seeds: [0]}
+  - {config: configs/ablations/B_tau_1.yaml, seeds: [0]}
+  - {config: configs/ablations/B_tau_4.yaml, seeds: [0]}
+  - {config: configs/ablations/B_no_ls.yaml, seeds: [0]}
+  - {config: configs/ablations/full_check_baseline.yaml, seeds: [0]}
+  - {config: configs/ablations/full_check_B_uniform.yaml, seeds: [0]}
+  - {config: configs/ablations/full_check_A_agree.yaml, seeds: [0]}

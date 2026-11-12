@@ -17,7 +17,7 @@ Changes for speed only (numerically equivalent, see tests/):
 Run:
     python -m pedger_kd.train_kd --config configs/A_agree.yaml --seed 0 \
         --data-root /kaggle/input/pedger-data --teacher-root /kaggle/input/pedger-teachers \
-        --out runs/A_agree_s0
+        --out runs/A_agree_s0 --max-hours 11
 """
 import argparse
 import json
@@ -123,14 +123,32 @@ def train_step(nets, batch, cfg, epoch, n_epochs, scaler=None, accum=1, amp=Fals
     return out
 
 
+
+
 class Trainer:
-    def __init__(self, cfg, out_dir, data_root=None, teacher_root=None, device=None, max_hours=None):
+    """Resumable trainer.
+
+    Checkpoints (`last.pt`) are written at every epoch end AND every `ckpt_minutes`
+    inside an epoch (always at an optimizer-step boundary). A mid-epoch checkpoint
+    stores the epoch's shuffle order, position, running loss sums and all RNG
+    states, so a resumed run continues exactly where it stopped: on CPU the result
+    is bit-identical to an uninterrupted run (tests/test_resume.py).
+    `deadline` (unix time) makes the run stop cleanly, with a checkpoint, at the
+    first optimizer step after it; `on_checkpoint(kind)` is called after every save
+    with kind in {"periodic", "epoch", "stopped", "done"} (used to upload to the remote).
+    """
+
+    def __init__(self, cfg, out_dir, data_root=None, teacher_root=None, device=None, max_hours=None,
+                 deadline=None, ckpt_minutes=30.0, on_checkpoint=None, should_stop=None):
         self.cfg = cfg
         self.out = Path(out_dir)
         self.out.mkdir(parents=True, exist_ok=True)
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.max_hours = max_hours
-        self._session_start = time.time()
+        now = time.time()
+        self.deadline = deadline if deadline is not None else (now + max_hours * 3600 if max_hours else None)
+        self.ckpt_minutes = ckpt_minutes
+        self.on_checkpoint = on_checkpoint
+        self.should_stop = should_stop          # optional callable(epoch, micro_step) -> bool (tests)
         tc = cfg["train"]
         seed_everything(int(cfg.get("seed", 0)))
         if self.device.type == "cuda":
@@ -172,19 +190,23 @@ class Trainer:
         self.samples_per_epoch = int(math.ceil(spe / step) * step)
         self.micro_per_epoch = self.samples_per_epoch // self.micro
 
-        self.start_epoch, self.elapsed = 0, 0.0
+        self.start_epoch, self.elapsed, self.resume_progress, self.sessions = 0, 0.0, None, 1
         self._resume()
+        self.position = {"epoch": self.start_epoch,
+                         "step": (self.resume_progress or {}).get("step", 0)}
+        self._mark = self._last_ckpt = time.time()
         dump_config(cfg, self.out / "config.yaml")
 
     # ---------------------------------------------------------------- state
-    def state(self, epoch):
+    def state(self, epoch, progress=None):
         st = {NET_KEYS[k]: n.state_dict() for k, n in self.nets.items()}
         st.update({
             "optimizer": self.opts["rec"].state_dict(), "optimizer_noshare": self.opts["ns"].state_dict(),
             "scheduler_warmup": self.scheds["rec"][0].state_dict(), "scheduler": self.scheds["rec"][1].state_dict(),
             "scheduler_warmup_noshare": self.scheds["ns"][0].state_dict(),
             "scheduler_noshare": self.scheds["ns"][1].state_dict(),
-            "scaler": self.scaler.state_dict(), "epoch": epoch, "elapsed_sec": self.elapsed,
+            "scaler": self.scaler.state_dict(), "epoch": epoch, "progress": progress,
+            "elapsed_sec": self.elapsed, "sessions": self.sessions,
             "rng": {"torch": torch.get_rng_state(), "numpy": np.random.get_state(), "python": random.getstate(),
                     "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None},
             "config": self.cfg,
@@ -210,18 +232,39 @@ class Trainer:
         np.random.set_state(rng["numpy"])
         random.setstate(rng["python"])
         if rng.get("cuda") is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all([r.cpu() for r in rng["cuda"]])
-        self.start_epoch = int(st["epoch"]) + 1
+            try:
+                torch.cuda.set_rng_state_all([r.cpu() for r in rng["cuda"]])
+            except Exception as e:  # different GPU count than the saving session
+                print(f"note: CUDA RNG state not restored ({e})")
+        self.resume_progress = st.get("progress")
+        self.start_epoch = int(st["epoch"]) if self.resume_progress else int(st["epoch"]) + 1
         self.elapsed = float(st.get("elapsed_sec", 0.0))
-        print(f"Resumed from {path} at epoch {self.start_epoch}")
+        self.sessions = int(st.get("sessions", 1)) + 1
+        where = (f"epoch {self.start_epoch}, micro-step {self.resume_progress['step']}/{self.micro_per_epoch}"
+                 if self.resume_progress else f"start of epoch {self.start_epoch}")
+        print(f"Resumed from {path} at {where} ({self.elapsed / 3600:.2f} GPU-h so far, session {self.sessions})")
 
-    def save(self, epoch):
+    def _tick(self):
+        now = time.time()
+        self.elapsed += now - self._mark
+        self._mark = now
+
+    def save(self, epoch, progress=None):
+        self._tick()
         tmp = self.out / "last.pt.tmp"
-        torch.save(self.state(epoch), tmp)
+        torch.save(self.state(epoch, progress), tmp)
         os.replace(tmp, self.out / "last.pt")
-        if self.cfg["train"].get("keep_epoch_ckpts", False):
+        self._last_ckpt = time.time()
+        if progress is None and self.cfg["train"].get("keep_epoch_ckpts", False):
             torch.save({NET_KEYS[k]: n.state_dict() for k, n in self.nets.items()},
                        self.out / f"epoch_{epoch:02d}.pt")
+
+    def _notify(self, kind):
+        if self.on_checkpoint is not None:
+            try:
+                self.on_checkpoint(kind)
+            except Exception as e:  # syncing must never kill training
+                print(f"WARNING: checkpoint callback failed ({kind}): {e}")
 
     # ---------------------------------------------------------------- loop
     def next_batch(self, perm, pos):
@@ -234,15 +277,26 @@ class Trainer:
             b["img"] = b["img"].contiguous(memory_format=torch.channels_last)
         return b
 
-    def run_epoch(self, epoch):
-        momentum_update(self.nets, epoch)
+    def run_epoch(self, epoch, progress=None):
+        """Returns (seconds, mean losses) when the epoch completes, or None if it stopped early."""
+        if progress is None:
+            momentum_update(self.nets, epoch)
+            perm, pos, start, sums, count, secs_before = torch.randperm(len(self.store)), 0, 0, {}, 0, 0.0
+        else:
+            perm = torch.as_tensor(progress["perm"], dtype=torch.long)
+            pos, start, count = int(progress["pos"]), int(progress["step"]), int(progress["count"])
+            sums, secs_before = dict(progress["sums"]), float(progress["epoch_seconds"])
         for n in self.nets.values():
             n.train()
-        sums, count = {}, 0
-        perm, pos = torch.randperm(len(self.store)), 0
         t0 = time.time()
         log_every = int(self.cfg["train"].get("log_every", 200))
-        for i in range(self.micro_per_epoch):
+
+        def snapshot(i):
+            return {"step": i + 1, "perm": perm.tolist(), "pos": pos, "count": count,
+                    "sums": {k: float(v) for k, v in sums.items()},
+                    "epoch_seconds": secs_before + time.time() - t0}
+
+        for i in range(start, self.micro_per_epoch):
             if pos >= len(perm):
                 perm, pos = torch.randperm(len(self.store)), 0
             batch = self.next_batch(perm, pos)
@@ -258,53 +312,75 @@ class Trainer:
                 self.scaler.update()
                 for k in ("rec", "ns"):
                     self.opts[k].zero_grad(set_to_none=True)
+                self.position = {"epoch": epoch, "step": i + 1}
+                last_step = i + 1 == self.micro_per_epoch
+                stop = (self.deadline is not None and time.time() >= self.deadline) or \
+                       (self.should_stop is not None and self.should_stop(epoch, i + 1))
+                if stop and not last_step:
+                    self.save(epoch, snapshot(i))
+                    print(f"Stopped cleanly at epoch {epoch}, micro-step {i + 1}/{self.micro_per_epoch}; "
+                          f"checkpoint saved. Re-run the same command to resume.", flush=True)
+                    self._notify("stopped")
+                    return None
+                if not last_step and time.time() - self._last_ckpt >= self.ckpt_minutes * 60:
+                    self.save(epoch, snapshot(i))
+                    self._notify("periodic")
             if (i + 1) % log_every == 0:
                 cur = {k: float(v) / count for k, v in sums.items()}
                 if not all(math.isfinite(v) for v in cur.values()):
                     raise FloatingPointError(f"non-finite loss at epoch {epoch} step {i}: {cur}")
-                rate = (i + 1) * self.micro / (time.time() - t0)
+                rate = (i + 1 - start) * self.micro / max(time.time() - t0, 1e-9)
                 eta_min = (self.samples_per_epoch - (i + 1) * self.micro) / rate / 60
                 print(f"[ep {epoch}/{self.n_epochs} {i + 1}/{self.micro_per_epoch}] "
                       + " ".join(f"{k}={v:.4f}" for k, v in cur.items())
                       + f" | {rate:.1f} img/s, epoch ETA {eta_min:.1f} min", flush=True)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
-        secs = time.time() - t0
         means = {k: float(v) / max(count, 1) for k, v in sums.items()}
-        return secs, means
+        return secs_before + time.time() - t0, means
 
     def run(self):
+        """Train until done (returns True) or until the deadline (returns False, resumable)."""
+        self._mark = self._last_ckpt = time.time()
         print(f"Training {self.cfg.get('name')} seed={self.cfg.get('seed')} on {self.device}: "
               f"{self.samples_per_epoch} samples/epoch x {self.n_epochs} epochs, "
-              f"micro_batch={self.micro} x accum={self.accum}, amp={self.amp}", flush=True)
+              f"micro_batch={self.micro} x accum={self.accum}, amp={self.amp}, "
+              f"checkpoint every {self.ckpt_minutes} min", flush=True)
+        if (self.out / "done.json").exists():
+            print("Run already finished.")
+            return True
+        progress = self.resume_progress
         for epoch in range(self.start_epoch, self.n_epochs):
-            if self.max_hours is not None and epoch > self.start_epoch:
-                per_epoch = self.elapsed / max(epoch, 1)
-                if (time.time() - self._session_start) / 3600 + per_epoch / 3600 > self.max_hours:
-                    print(f"Stopping before epoch {epoch}: --max-hours {self.max_hours} would be exceeded. "
-                          f"Re-run the same command to resume.")
-                    return False
+            if self.deadline is not None and time.time() >= self.deadline:
+                print(f"Deadline reached before epoch {epoch}; nothing to do this session.")
+                return False
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats()
             lr = self.opts["rec"].param_groups[0]["lr"]
-            secs, means = self.run_epoch(epoch)
-            self.elapsed += secs
+            result = self.run_epoch(epoch, progress)
+            progress = None
+            if result is None:
+                return False
+            secs, means = result
             for k in ("rec", "ns"):
                 self.scheds[k][0].step()
+            self.save(epoch)
             rec = {"epoch": epoch, "lr": lr, "seconds": round(secs, 1), "gpu_hours_total": self.elapsed / 3600,
-                   "samples": self.samples_per_epoch, **means}
+                   "samples": self.samples_per_epoch, "session": self.sessions, **means}
             if self.device.type == "cuda":
                 rec["peak_mem_gb"] = torch.cuda.max_memory_allocated() / 1e9
                 rec["gpu"] = torch.cuda.get_device_name()
             with open(self.out / "log.jsonl", "a") as f:
                 f.write(json.dumps(rec) + "\n")
             print(json.dumps(rec), flush=True)
-            self.save(epoch)
+            self.position = {"epoch": epoch + 1, "step": 0}
+            self._notify("epoch")
         torch.save({NET_KEYS[k]: n.state_dict() for k, n in self.nets.items()}, self.out / "final.pt")
         with open(self.out / "done.json", "w") as f:
-            json.dump({"gpu_hours": self.elapsed / 3600, "epochs": self.n_epochs,
+            json.dump({"gpu_hours": self.elapsed / 3600, "epochs": self.n_epochs, "sessions": self.sessions,
                        "samples_per_epoch": self.samples_per_epoch}, f, indent=2)
-        print(f"Done: {self.out / 'final.pt'} ({self.elapsed / 3600:.2f} GPU-h)")
+        print(f"Done: {self.out / 'final.pt'} ({self.elapsed / 3600:.2f} GPU-h over {self.sessions} session(s))")
+        self._notify("done")
         return True
 
 
@@ -316,13 +392,15 @@ def main():
     p.add_argument("--data-root", default=".")
     p.add_argument("--teacher-root", default=".")
     p.add_argument("--max-hours", type=float, default=None,
-                   help="stop cleanly before an epoch that would exceed this session budget")
+                   help="stop cleanly (with a checkpoint) after this many hours; re-run to resume")
+    p.add_argument("--ckpt-minutes", type=float, default=30.0, help="mid-epoch checkpoint interval")
     p.add_argument("--set", nargs="*", default=[], help="overrides, e.g. train.epochs=10")
     args = p.parse_args()
     cfg = load_config(args.config, args.set)
     if args.seed is not None:
         cfg["seed"] = args.seed
-    Trainer(cfg, args.out, args.data_root, args.teacher_root, max_hours=args.max_hours).run()
+    Trainer(cfg, args.out, args.data_root, args.teacher_root, max_hours=args.max_hours,
+            ckpt_minutes=args.ckpt_minutes).run()
 
 
 if __name__ == "__main__":

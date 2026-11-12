@@ -20,3 +20,6 @@ __pycache__/
 
 # Notebooks
 .ipynb_checkpoints/
+
+# Code zip for Kaggle upload (tools/make_code_zip.py)
+dist/

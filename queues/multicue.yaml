@@ -1,0 +1,8 @@
+# Step 12: MultiCue boundaries, 3 random splits x (baseline, ours), 1 seed each (mean +- std over splits).
+jobs:
+  - {config: configs/multicue/baseline.yaml, seeds: [0], set: [data.store=multicue_boundary_split0, data.teacher_dir=multicue_boundary_split0, name=multicue_baseline_split0]}
+  - {config: configs/multicue/A_agree.yaml, seeds: [0], set: [data.store=multicue_boundary_split0, data.teacher_dir=multicue_boundary_split0, name=multicue_A_agree_split0]}
+  - {config: configs/multicue/baseline.yaml, seeds: [0], set: [data.store=multicue_boundary_split1, data.teacher_dir=multicue_boundary_split1, name=multicue_baseline_split1]}
+  - {config: configs/multicue/A_agree.yaml, seeds: [0], set: [data.store=multicue_boundary_split1, data.teacher_dir=multicue_boundary_split1, name=multicue_A_agree_split1]}
+  - {config: configs/multicue/baseline.yaml, seeds: [0], set: [data.store=multicue_boundary_split2, data.teacher_dir=multicue_boundary_split2, name=multicue_baseline_split2]}
+  - {config: configs/multicue/A_agree.yaml, seeds: [0], set: [data.store=multicue_boundary_split2, data.teacher_dir=multicue_boundary_split2, name=multicue_A_agree_split2]}

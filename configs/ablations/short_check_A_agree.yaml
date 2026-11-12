@@ -1,6 +1,6 @@
 # Short-schedule A_agree on the dev split; pairs with full_check_A_agree.
 base: ../A_agree.yaml
-name: check_A_agree
+name: short_check_A_agree
 data:
   split: train
   samples_per_epoch: 6400

@@ -92,11 +92,11 @@ for k, v in ABL_B.items():
 for m in ("baseline", "B_uniform", "A_agree"):
     FILES[f"ablations/short_check_{m}.yaml"] = (
         f"Short-schedule {m} on the dev split; pairs with full_check_{m}.",
-        {"base": f"../{m}.yaml", "name": f"check_{m}", "data": {"split": "train", "samples_per_epoch": 6400},
+        {"base": f"../{m}.yaml", "name": f"short_check_{m}", "data": {"split": "train", "samples_per_epoch": 6400},
          "train": {"schedule_tag": "short"}})
     FILES[f"ablations/full_check_{m}.yaml"] = (
         f"Full-schedule {m} on the dev split; pairs with short_check_{m}.",
-        {"base": f"../{m}.yaml", "name": f"check_{m}", "data": {"split": "train"},
+        {"base": f"../{m}.yaml", "name": f"full_check_{m}", "data": {"split": "train"},
          "train": {"schedule_tag": "full_dev"}})
 
 

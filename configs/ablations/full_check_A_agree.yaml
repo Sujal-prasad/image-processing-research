@@ -1,6 +1,6 @@
 # Full-schedule A_agree on the dev split; pairs with short_check_A_agree.
 base: ../A_agree.yaml
-name: check_A_agree
+name: full_check_A_agree
 data:
   split: train
 train:
