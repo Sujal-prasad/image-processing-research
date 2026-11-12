@@ -1,0 +1,4 @@
+base: _short_B.yaml
+name: abl_B_lambda_2
+kd:
+  lambda: 2.0

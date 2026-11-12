@@ -1,0 +1,10 @@
+base: _multicue.yaml
+name: multicue_A_agree
+data:
+  teacher: ensemble_mean
+method:
+  target: agreement
+  alpha_mode: agreement
+  alpha_min: 0.1
+  gamma: 0.5
+  ramp: true

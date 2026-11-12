@@ -1,0 +1,7 @@
+base: _nyud.yaml
+name: nyud_B_uniform
+data:
+  teacher: ensemble_mean
+kd:
+  enabled: true
+  weight: uniform

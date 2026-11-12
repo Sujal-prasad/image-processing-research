@@ -1,0 +1,11 @@
+# MultiCue boundaries, split 0 of 3 (override data.store / data.teacher_dir for
+# splits 1 and 2). Images are 1280x720: random 512x512 crops.
+base: ../base.yaml
+data:
+  store: multicue_boundary_split0
+  teacher_dir: multicue_boundary_split0
+  split: train
+augment:
+  crop:
+  - 512
+  - 512

@@ -1,0 +1,8 @@
+# Variant B, uniform weight, SAUGE only (H1).
+base: base.yaml
+name: B_uniform
+data:
+  teacher: sauge
+kd:
+  enabled: true
+  weight: uniform

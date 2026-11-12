@@ -1,0 +1,7 @@
+# What to avoid: 4 images per pass with stock BN (statistics pooled across images).
+base: _bn.yaml
+name: bn_stock4
+train:
+  micro_batch: 4
+  accum_steps: 4
+  norm: stock

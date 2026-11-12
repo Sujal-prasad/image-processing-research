@@ -1,0 +1,6 @@
+# NYUDv2: one annotation per image, so no agreement map. Store from data/prepare_list.py.
+base: ../base.yaml
+data:
+  store: nyud
+  teacher_dir: nyud
+  split: trainval

@@ -1,0 +1,9 @@
+# (a) constant alpha following PEdger's eta schedule, teachers mixed in.
+base: _nyud.yaml
+name: nyud_A_eta
+data:
+  teacher: ensemble_mean
+method:
+  target: agreement
+  alpha_mode: eta
+  ramp: false

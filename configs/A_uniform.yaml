@@ -1,0 +1,11 @@
+# Variant A with uniform alpha = 1 - eta (PEdger's schedule, same for every pixel) and the
+# teacher ensemble mixed in. Control for H2: same as A_agree except that trust does not
+# depend on human agreement.
+base: base.yaml
+name: A_uniform
+data:
+  teacher: ensemble_mean
+method:
+  target: agreement
+  alpha_mode: eta
+  ramp: false

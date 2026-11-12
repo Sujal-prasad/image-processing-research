@@ -1,0 +1,8 @@
+# Short-schedule B_uniform on the dev split; pairs with full_check_B_uniform.
+base: ../B_uniform.yaml
+name: check_B_uniform
+data:
+  split: train
+  samples_per_epoch: 6400
+train:
+  schedule_tag: short

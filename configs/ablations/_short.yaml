@@ -1,0 +1,9 @@
+# Short ablation schedule: dev split (train, 200 images; score on val), one third of the
+# samples per epoch. Epoch count, warm-up, eta ramp and momentum averaging are unchanged.
+# Check once that short runs rank methods like full runs (short_check_* vs full_check_*).
+base: ../A_agree.yaml
+data:
+  split: train
+  samples_per_epoch: 6400
+train:
+  schedule_tag: short

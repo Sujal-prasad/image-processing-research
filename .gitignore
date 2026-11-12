@@ -1,0 +1,22 @@
+# Upstream code is fetched by tools/fetch_upstream.py at pinned commits
+third_party/
+
+# Data, caches, runs and checkpoints never go in git (use Kaggle Datasets)
+data_store/
+teacher_cache/
+runs/
+outputs/
+*.pt
+*.pth
+*.npy
+*.npz
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Notebooks
+.ipynb_checkpoints/

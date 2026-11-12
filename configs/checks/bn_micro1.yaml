@@ -1,0 +1,6 @@
+# PEdger's setup: 1 image per forward pass, 16 accumulated.
+base: _bn.yaml
+name: bn_micro1
+train:
+  micro_batch: 1
+  accum_steps: 16

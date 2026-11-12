@@ -1,0 +1,7 @@
+# BatchNorm check (step 9): short baseline runs on the dev split, scored on val.
+base: ../baseline.yaml
+data:
+  split: train
+  samples_per_epoch: 3200
+train:
+  schedule_tag: bn_check

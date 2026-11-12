@@ -1,0 +1,8 @@
+# Short-schedule baseline on the dev split; pairs with full_check_baseline.
+base: ../baseline.yaml
+name: check_baseline
+data:
+  split: train
+  samples_per_epoch: 6400
+train:
+  schedule_tag: short

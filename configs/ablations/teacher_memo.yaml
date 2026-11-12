@@ -1,0 +1,4 @@
+base: _short.yaml
+name: abl_teacher_memo
+data:
+  teacher: memo

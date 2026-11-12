@@ -1,0 +1,10 @@
+# (b) teacher-confidence trust: alpha = 1 - c |2T - 1|.
+base: _nyud.yaml
+name: nyud_A_teacher_conf
+data:
+  teacher: ensemble_mean
+method:
+  target: agreement
+  alpha_mode: teacher_conf
+  teacher_conf_c: 0.8
+  ramp: true

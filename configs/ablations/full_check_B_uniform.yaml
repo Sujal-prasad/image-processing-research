@@ -1,0 +1,7 @@
+# Full-schedule B_uniform on the dev split; pairs with short_check_B_uniform.
+base: ../B_uniform.yaml
+name: check_B_uniform
+data:
+  split: train
+train:
+  schedule_tag: full_dev

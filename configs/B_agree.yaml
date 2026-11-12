@@ -1,0 +1,8 @@
+# Variant B, agreement-weighted, teacher ensemble.
+base: base.yaml
+name: B_agree
+data:
+  teacher: ensemble_mean
+kd:
+  enabled: true
+  weight: agreement

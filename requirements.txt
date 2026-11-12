@@ -1,0 +1,20 @@
+# Core (training, data prep, tests)
+torch>=2.1
+torchvision>=0.16
+numpy
+scipy
+pillow
+pyyaml
+opencv-python-headless
+tqdm
+pytest
+
+# Evaluation (BSDS benchmark port; builds a Cython extension, works on Kaggle/Linux)
+pyEdgeEval==0.2.8
+scikit-image
+
+# Optional: FLOPs counting in bench/speed_flops.py
+thop
+
+# Teacher caching only (install in the teacher notebook, not needed for training)
+# SAUGE: einops   MuGE: efficientnet_pytorch   MEMO: see third_party/MEMO_Edge_Detection/requirements.txt

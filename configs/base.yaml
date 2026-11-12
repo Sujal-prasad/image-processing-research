@@ -1,0 +1,57 @@
+# Shared settings = official PEdger training (main.py), BSDS-only setting.
+name: base
+seed: 0
+
+data:
+  store: bsds                 # folder under --data-root (data/prepare_bsds.py)
+  teacher_dir: bsds           # folder under --teacher-root (teachers/pack_cache.py)
+  split: trainval             # final runs: train+val (300 images). Dev/ablations: train (200)
+  teacher: null               # null | ensemble_mean | ensemble_confidence | sauge | muge | memo
+  agreement_dilation: 0       # 0 | 1 | 2 px dilation of each annotator before averaging (alpha only)
+  samples_per_epoch: null     # null = images x 96 augmentations (= size of HED-augmented BSDS)
+  voc: false                  # BSDS-only setting (PEdger .813 published)
+  data_on_gpu: true
+
+augment:                      # HED/RCF BSDS augmentation family, applied on the fly
+  angles_deg: [0, 22.5, 45, 67.5, 90, 112.5, 135, 157.5, 180, 202.5, 225, 247.5, 270, 292.5, 315, 337.5]
+  scales: [0.5, 1.0, 1.5]
+  hflip: true
+  color_jitter: [0.5, 0.5, 0.5, 0.5]   # official ColorJitter(brightness, contrast, saturation, hue)
+  grayscale_p: 0.2
+  label_threshold: 0.2        # official: edge_gt >= 0.2
+  crop: null
+
+train:
+  epochs: 30
+  micro_batch: 4              # images per forward pass (per-image normalisation keeps batch-1 behaviour)
+  accum_steps: 4              # micro_batch x accum_steps = 16 = official iter_size
+  lr: 0.001
+  warmup_multiplier: 8        # official GradualWarmupScheduler: 1e-3 -> 8e-3 over 4 epochs, then cosine
+  warmup_epochs: 4
+  amp: true
+  norm: per_sample            # per_sample | stock (stock only for the BatchNorm check)
+  channels_last: true
+  bilateral: true
+  keep_epoch_ckpts: false
+  log_every: 200
+  schedule_tag: full
+
+method:                       # soft target
+  target: pedger              # pedger (official) | agreement (Variant A)
+  alpha_mode: agreement       # agreement | eta (uniform, PEdger schedule) | teacher_conf | const
+  alpha_min: 0.1
+  teacher_conf_c: 0.8
+  gamma: 0.5                  # weight of teachers T vs self-ensemble M; or "confidence"
+  ramp: true                  # multiply (1 - alpha) by ep/EP so early epochs follow the labels
+
+kd:                           # Variant B (extra loss term)
+  enabled: false
+  lambda: 1.0
+  tau: 2.0
+  use_ls: true                # logit standardisation
+  weight: uniform             # uniform | agreement (w = 1 - alpha + w_min)
+  w_min: 0.1
+
+eval:
+  deploy: ns_m                # non-recurrent momentum network = the 0.73M model (confirm in step 1)
+  output_transform: pedger    # official test.py transform sigmoid(2z - 1)

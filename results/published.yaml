@@ -1,0 +1,9 @@
+# Published reference numbers (single-scale unless ms: true). Shown only in tables
+# whose setting matches (dataset, split, voc, ms). Re-check every number against the
+# original paper before submission (plan section 13).
+- {method: "PEdger (BSDS only, from PEdger++ paper)", dataset: bsds, split: test, voc: false, ms: false, ODS: 0.813, OIS: 0.834}
+- {method: "PEdger (BSDS + VOC)", dataset: bsds, split: test, voc: true, ms: false, ODS: 0.821, OIS: 0.840}
+- {method: "PEdger (NYUDv2 RGB)", dataset: nyud, split: test, voc: false, ms: false, ODS: 0.742, OIS: 0.757}
+- {method: "SAUGE (teacher 1, BSDS only)", dataset: bsds, split: test, voc: false, ms: false, ODS: 0.839, OIS: 0.860, AP: 0.893}
+- {method: "MuGE (teacher 2, single output)", dataset: bsds, split: test, voc: false, ms: false, ODS: 0.831, OIS: 0.847, AP: 0.886}
+- {method: "MEMO (teacher 3)", dataset: bsds, split: test, voc: false, ms: false, ODS: 0.854, OIS: 0.861}

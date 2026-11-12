@@ -1,0 +1,7 @@
+# Short schedule for Variant B ablations.
+base: ../B_uniform.yaml
+data:
+  split: train
+  samples_per_epoch: 6400
+train:
+  schedule_tag: short

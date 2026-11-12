@@ -1,0 +1,7 @@
+# Full-schedule baseline on the dev split; pairs with short_check_baseline.
+base: ../baseline.yaml
+name: check_baseline
+data:
+  split: train
+train:
+  schedule_tag: full_dev

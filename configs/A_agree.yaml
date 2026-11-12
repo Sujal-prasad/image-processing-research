@@ -1,0 +1,11 @@
+# Variant A, agreement-aware, teacher ensemble: the full method.
+base: base.yaml
+name: A_agree
+data:
+  teacher: ensemble_mean
+method:
+  target: agreement
+  alpha_mode: agreement
+  alpha_min: 0.1
+  gamma: 0.5
+  ramp: true

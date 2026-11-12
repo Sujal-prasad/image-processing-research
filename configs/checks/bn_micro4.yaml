@@ -1,0 +1,7 @@
+# Our setup: 4 images per pass with per-image normalisation.
+base: _bn.yaml
+name: bn_micro4
+train:
+  micro_batch: 4
+  accum_steps: 4
+  norm: per_sample
