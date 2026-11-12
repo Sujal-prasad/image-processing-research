@@ -23,3 +23,6 @@ __pycache__/
 
 # Code zip for Kaggle upload (tools/make_code_zip.py)
 dist/
+
+# Research documents (Word/PDF reports, not tracked in git)
+docs/
