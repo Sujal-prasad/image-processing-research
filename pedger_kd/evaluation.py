@@ -13,6 +13,29 @@ from pathlib import Path
 import numpy as np
 
 
+_PYEDGEEVAL_READY = False
+
+
+def ensure_pyedgeeval():
+    """Make sure the benchmark port is importable; install it with tools/install_pyedgeeval.py if not.
+    (`pip install pyEdgeEval` fails to build on Python >= 3.13, which Kaggle uses.)"""
+    global _PYEDGEEVAL_READY
+    if _PYEDGEEVAL_READY:
+        return
+    try:
+        import pyEdgeEval._lib  # noqa: F401
+    except ImportError:
+        import importlib
+        import subprocess
+        import sys
+        script = Path(__file__).resolve().parents[1] / "tools" / "install_pyedgeeval.py"
+        print("pyEdgeEval is not installed: installing it now with tools/install_pyedgeeval.py", flush=True)
+        subprocess.run([sys.executable, str(script)], check=True)
+        importlib.invalidate_caches()
+        import pyEdgeEval._lib  # noqa: F401
+    _PYEDGEEVAL_READY = True
+
+
 def load_gt(path):
     path = str(path)
     if path.endswith(".mat"):
@@ -61,6 +84,7 @@ def _eval_one(kw):
 
 def evaluate(pred_dir, items, max_dist=0.0075, thresholds=99, nproc=4, apply_nms=True, apply_thinning=True):
     """items: list of dicts {name, gt}. Predictions are read from pred_dir/<name>.png."""
+    ensure_pyedgeeval()
     from pyEdgeEval.common.binary_label import calculate_metrics
     samples = [dict(name=it["name"], gt_path=it["gt"], pred_path=str(Path(pred_dir) / f"{it['name']}.png"),
                     thresholds=thresholds, max_dist=max_dist, apply_nms=apply_nms,

@@ -130,7 +130,11 @@ tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks
 ```
 python tools/fetch_upstream.py          # official PEdger at the pinned commit
 pip install -r requirements.txt
-pytest tests                            # 82 tests, CPU, ~5 minutes
+pytest tests                            # 85 tests, CPU, ~4 minutes
+python tools/install_pyedgeeval.py      # benchmark scorer (only needed for scoring)
 ```
-`pyEdgeEval` builds a C++ extension. It installs out of the box on Kaggle/Linux; on Windows it needs
-the MSVC build tools. Everything except benchmark scoring runs without it.
+The benchmark scorer `pyEdgeEval 0.2.8` is not installed with pip directly: its PyPI package fails to build on
+Python 3.13+ (Kaggle) because its `setup.py` relies on pre-PEP 667 `locals()` behaviour. `tools/install_pyedgeeval.py`
+downloads the official source (SHA-256 pinned), applies three small build/import patches (no algorithm changes),
+compiles it, and runs a self-test. The scoring code calls it automatically if the scorer is missing. It needs a C++
+compiler (present on Kaggle/Linux; on Windows, the MSVC build tools). Everything except scoring runs without it.

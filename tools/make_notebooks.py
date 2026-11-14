@@ -31,7 +31,7 @@ except Exception as e:
     raise RuntimeError("Secret HF_TOKEN is not available: Add-ons -> Secrets -> add HF_TOKEN and tick it for THIS "
                        "notebook, then run again.") from e
 os.environ["PEDGER_REMOTE"] = "hf:" + HF_REPO
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "huggingface_hub>=0.25", "pyyaml"], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub>=0.25,<2.0", "pyyaml"], check=True)
 W, REPO, WS = "/kaggle/working", "/kaggle/working/pedger-mtkd", "/kaggle/working/ws"
 if not os.path.exists(REPO):
     attached = sorted(glob.glob("/kaggle/input/*/pedger_kd/__init__.py") + glob.glob("/kaggle/input/*/*/pedger_kd/__init__.py"))
@@ -55,7 +55,8 @@ sys.path.insert(0, REPO)
 if subprocess.run([sys.executable, "-m", "pedger_kd.preflight"]).returncode:
     raise RuntimeError("Preflight failed: fix the PROBLEM lines printed above, then run the notebook again.")"""
 
-PIP_EVAL = """!pip install -q -r requirements.txt   # includes pyEdgeEval (benchmark), builds in ~1-2 min"""
+PIP_EVAL = """!pip install -q -r requirements.txt
+!python tools/install_pyedgeeval.py   # BSDS benchmark scorer; patched build for Python 3.13+, ~1-2 min"""
 
 BSDS_RAW = """# BSDS500 original release (per-annotator ground truth); ~70 MB
 RAW_BSDS = "/kaggle/working/BSR/BSDS500/data"

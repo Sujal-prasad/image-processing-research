@@ -28,7 +28,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pedger_kd.data import read_meta  # noqa: E402
-from pedger_kd.evaluation import load_gt, load_pred, read_eval_list  # noqa: E402
+from pedger_kd.evaluation import ensure_pyedgeeval, load_gt, load_pred, read_eval_list  # noqa: E402
 
 BINS = {"low": (0.0, 1 / 3), "medium": (1 / 3, 2 / 3), "high": (2 / 3, 1.0)}
 
@@ -92,6 +92,7 @@ def main():
     p.add_argument("--nproc", type=int, default=4)
     p.add_argument("--out", required=True)
     args = p.parse_args()
+    ensure_pyedgeeval()
     meta = read_meta(args.store)
     items = read_eval_list(args.store, args.split, args.raw_root)
     result = {}

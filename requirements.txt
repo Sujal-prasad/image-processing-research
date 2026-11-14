@@ -8,10 +8,10 @@ pyyaml
 opencv-python-headless
 tqdm
 pytest
-huggingface_hub>=0.25         # remote storage (checkpoints, data, code) shared across Kaggle accounts
+huggingface_hub>=0.25,<2.0    # remote storage (checkpoints, data, code) shared across Kaggle accounts
 
-# Evaluation (BSDS benchmark port; builds a Cython extension, works on Kaggle/Linux)
-pyEdgeEval==0.2.8
+# Evaluation: the BSDS benchmark port pyEdgeEval 0.2.8 is installed by tools/install_pyedgeeval.py
+# (its PyPI package cannot build on Python >= 3.13, e.g. Kaggle); evaluation code calls it automatically.
 scikit-image
 
 # Optional: FLOPs counting in bench/speed_flops.py
