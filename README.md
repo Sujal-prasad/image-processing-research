@@ -137,6 +137,9 @@ python tools/install_pyedgeeval.py      # benchmark scorer (only needed for scor
 ```
 The benchmark scorer `pyEdgeEval 0.2.8` is not installed with pip directly: its PyPI package fails to build on
 Python 3.13+ (Kaggle) because its `setup.py` relies on pre-PEP 667 `locals()` behaviour. `tools/install_pyedgeeval.py`
-downloads the official source (SHA-256 pinned), applies three small build/import patches (no algorithm changes),
-compiles it, and runs a self-test. The scoring code calls it automatically if the scorer is missing. It needs a C++
-compiler (present on Kaggle/Linux; on Windows, the MSVC build tools). Everything except scoring runs without it.
+first downloads the official source (SHA-256 pinned), applies small build fixes (no algorithm changes: the
+`setup.py` version lookup, C++14 mode, missing standard `#include`s, one SciPy import), compiles it, and runs a
+self-test. If compiling fails, it prints the compiler errors and falls back to the official **prebuilt** pyEdgeEval
+0.2.8 wheel (published for Python 3.8 only) in a small separate Python 3.8 environment made with `uv`; scoring then
+runs in that interpreter (`pedger_kd/score_worker.py`), with the same code and the same numbers. The scoring code
+calls the installer automatically if the scorer is missing. Everything except scoring runs without it.

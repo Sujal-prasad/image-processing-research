@@ -27,8 +27,13 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from pedger_kd.data import read_meta  # noqa: E402
-from pedger_kd.evaluation import ensure_pyedgeeval, load_gt, load_pred, read_eval_list  # noqa: E402
+# no torch-importing modules here: this script may rerun itself in the Python 3.8 scorer environment
+from pedger_kd.evaluation import ensure_pyedgeeval, load_gt, load_pred, read_eval_list, scorer_env  # noqa: E402
+
+
+def read_meta(store_dir):
+    with open(Path(store_dir) / "meta.json") as f:
+        return json.load(f)
 
 BINS = {"low": (0.0, 1 / 3), "medium": (1 / 3, 2 / 3), "high": (2 / 3, 1.0)}
 
@@ -92,7 +97,10 @@ def main():
     p.add_argument("--nproc", type=int, default=4)
     p.add_argument("--out", required=True)
     args = p.parse_args()
-    ensure_pyedgeeval()
+    python = ensure_pyedgeeval()
+    if python is not None:   # pyEdgeEval lives in the separate scorer interpreter: rerun this script there
+        import subprocess
+        sys.exit(subprocess.run([python, str(Path(__file__).resolve())] + sys.argv[1:], env=scorer_env()).returncode)
     meta = read_meta(args.store)
     items = read_eval_list(args.store, args.split, args.raw_root)
     result = {}

@@ -8,32 +8,79 @@ Ground truth: BSDS-style .mat (groundTruth{i}.Boundaries, one per annotator),
 another .mat holding a single 2-D array, or a PNG (> 0 = edge).
 """
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+# Written by tools/install_pyedgeeval.py when pyEdgeEval runs in a separate interpreter
+SCORER_MARKER = Path.home() / ".cache" / "pedger_scorer.json"
+_UNSET = object()
+_SCORER = _UNSET
 
-_PYEDGEEVAL_READY = False
+
+def _have_pyedgeeval():
+    try:
+        import pyEdgeEval._lib  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _recorded_scorer():
+    try:
+        py = json.loads(SCORER_MARKER.read_text())["python"]
+        return py if Path(py).exists() else None
+    except Exception:
+        return None
 
 
 def ensure_pyedgeeval():
-    """Make sure the benchmark port is importable; install it with tools/install_pyedgeeval.py if not.
-    (`pip install pyEdgeEval` fails to build on Python >= 3.13, which Kaggle uses.)"""
-    global _PYEDGEEVAL_READY
-    if _PYEDGEEVAL_READY:
-        return
-    try:
-        import pyEdgeEval._lib  # noqa: F401
-    except ImportError:
+    """Make the benchmark port available. Returns None if pyEdgeEval works in this interpreter, or
+    the path of the separate interpreter that has it (fallback set up by tools/install_pyedgeeval.py,
+    because `pip install pyEdgeEval` cannot build on Python >= 3.13, which Kaggle uses)."""
+    global _SCORER
+    if _SCORER is not _UNSET:
+        return _SCORER
+    if _have_pyedgeeval():
+        _SCORER = None
+        return None
+    py = _recorded_scorer()
+    if py is None:
         import importlib
         import subprocess
         import sys
-        script = Path(__file__).resolve().parents[1] / "tools" / "install_pyedgeeval.py"
-        print("pyEdgeEval is not installed: installing it now with tools/install_pyedgeeval.py", flush=True)
-        subprocess.run([sys.executable, str(script)], check=True)
+        print("pyEdgeEval is not available: running tools/install_pyedgeeval.py", flush=True)
+        subprocess.run([sys.executable, str(ROOT / "tools" / "install_pyedgeeval.py")], check=True)
         importlib.invalidate_caches()
-        import pyEdgeEval._lib  # noqa: F401
-    _PYEDGEEVAL_READY = True
+        if _have_pyedgeeval():
+            _SCORER = None
+            return None
+        py = _recorded_scorer()
+        if py is None:
+            raise RuntimeError("pyEdgeEval installation finished but no working scorer was found")
+    _SCORER = py
+    return py
+
+
+def scorer_env():
+    """Environment for running a module of this repo under the separate scorer interpreter."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT)] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    return env
+
+
+def _evaluate_external(python, spec):
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        sp, out = Path(d) / "spec.json", Path(d) / "out.json"
+        sp.write_text(json.dumps(spec))
+        subprocess.run([python, "-m", "pedger_kd.score_worker", str(sp), str(out)], cwd=ROOT,
+                       env=scorer_env(), check=True)
+        res = json.loads(out.read_text())
+    return res["scores"], res["per_sample"], res["curve"]
 
 
 def load_gt(path):
@@ -84,7 +131,12 @@ def _eval_one(kw):
 
 def evaluate(pred_dir, items, max_dist=0.0075, thresholds=99, nproc=4, apply_nms=True, apply_thinning=True):
     """items: list of dicts {name, gt}. Predictions are read from pred_dir/<name>.png."""
-    ensure_pyedgeeval()
+    python = ensure_pyedgeeval()
+    if python is not None:   # pyEdgeEval lives in a separate interpreter: run this same function there
+        spec = dict(pred_dir=str(pred_dir), items=[{"name": it["name"], "gt": str(it["gt"])} for it in items],
+                    max_dist=max_dist, thresholds=thresholds, nproc=nproc, apply_nms=apply_nms,
+                    apply_thinning=apply_thinning)
+        return _evaluate_external(python, spec)
     from pyEdgeEval.common.binary_label import calculate_metrics
     samples = [dict(name=it["name"], gt_path=it["gt"], pred_path=str(Path(pred_dir) / f"{it['name']}.png"),
                     thresholds=thresholds, max_dist=max_dist, apply_nms=apply_nms,

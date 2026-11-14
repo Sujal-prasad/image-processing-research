@@ -49,6 +49,10 @@ def make_tree(tmp_path):
         '__version__ = "0.2.8"\n__author__ = "x"\n__email__ = "y"\n__url__ = "z"\n')
     (tmp_path / "pyEdgeEval" / "utils" / "distance_transforms.py").write_text(
         "from scipy.ndimage.morphology import distance_transform_edt\n")
+    inc = tmp_path / "pyEdgeEval" / "_lib" / "include"
+    inc.mkdir(parents=True)
+    (inc / "Matrix.hh").write_text("\n#ifndef __Matrix_hh__\n#define __Matrix_hh__\nclass Matrix {};\n#endif\n")
+    (inc / "csa_defs.h").write_text("#define\tTRUE\t1\n#define\tFALSE\t0\n")
     return tmp_path
 
 
@@ -59,6 +63,9 @@ def test_patched_setup_runs_and_uses_cpp14(tmp_path):
     assert out.split() == ["0.2.8", "x", "-std=c++14"]
     assert "from scipy.ndimage import distance_transform_edt" in \
         (src / "pyEdgeEval/utils/distance_transforms.py").read_text()
+    m = (src / "pyEdgeEval/_lib/include/Matrix.hh").read_text()
+    assert m.index("#define __Matrix_hh__") < m.index("#include <cstdlib>") < m.index("class Matrix")
+    assert (src / "pyEdgeEval/_lib/include/csa_defs.h").read_text().startswith("#include <cmath>")
 
 
 def test_unexpected_source_fails_loudly(tmp_path):

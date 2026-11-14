@@ -1,23 +1,30 @@
 """Install the BSDS benchmark port (pyEdgeEval 0.2.8) on any Python, including 3.13+ (Kaggle).
 
-`pip install pyEdgeEval==0.2.8` fails on Python >= 3.13: its setup.py reads the version with
-`exec(...)` + `locals()[...]` inside a function, which PEP 667 (Python 3.13) changed, so the build
-stops with KeyError: '__version__' before compiling anything. This script:
-  1. skips everything if a working pyEdgeEval is already installed (self-test passes);
-  2. downloads the official 0.2.8 source from PyPI and checks its SHA-256;
-  3. applies three small, explicit patches (setup.py version lookup; C++14 mode for the old
-     `register` keywords in csa.hh; scipy.ndimage import that SciPy 2.0 removes);
-  4. builds and installs it with pip;
-  5. runs a self-test: pixel matching on known shapes and a perfect-prediction benchmark.
-The algorithm code is not modified.
+`pip install pyEdgeEval==0.2.8` fails on Python >= 3.13. This script tries, in order:
 
-    python tools/install_pyedgeeval.py [--workdir DIR] [--force]
+  1. nothing to do: pyEdgeEval already works in this Python, or a scorer environment from step 3
+     already exists (self-test passes);
+  2. COMPILE: download the official 0.2.8 source (SHA-256 pinned), apply small build fixes
+     (setup.py version lookup broken by PEP 667 in Python 3.13; C++14 mode; standard #includes
+     that new compilers no longer pull in implicitly; a SciPy import removed in SciPy 2.0), build it
+     with this Python, and self-test. On failure the compiler's error lines are printed;
+  3. FALLBACK (no compiler needed): create a small separate Python 3.8 environment with `uv` and
+     install the official prebuilt pyEdgeEval 0.2.8 wheel (published for Python 3.8 only).
+     The scoring code then runs the benchmark in that interpreter (pedger_kd/score_worker.py).
+The matching algorithm itself is never modified. A self-test checks pixel matching on known
+shapes and a perfect-prediction benchmark before anything is used.
+
+    python tools/install_pyedgeeval.py [--mode auto|compile|py38] [--force]
 """
 import argparse
 import hashlib
+import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import tempfile
 import urllib.request
@@ -28,6 +35,11 @@ URL = ("https://files.pythonhosted.org/packages/77/b9/a7294370ebccd4b9b2fc3f17f8
        "pyedgeeval-0.2.8.tar.gz")
 SHA256 = "dd94dbef7acd499c7266704fa34c01a1fcecab38935253db1b3748849890403c"
 
+# Where the fallback scorer environment is recorded (read by pedger_kd/evaluation.py)
+MARKER = Path.home() / ".cache" / "pedger_scorer.json"
+PY38_DIR = Path("/kaggle/working/scorer_py38") if Path("/kaggle").exists() else Path.home() / ".cache" / "pedger_scorer_py38"
+PY38_PACKAGES = [f"pyEdgeEval=={VERSION}", "numpy<1.25", "scipy<1.11", "opencv-python-headless", "pyyaml"]
+
 # (file, old, new, minimum number of occurrences)
 PATCHES = [
     ("setup.py", 'PKG_NAME = "pyEdgeEval"\n', 'PKG_NAME = "pyEdgeEval"\n_INFO = {}  # patched: PEP 667 (Python 3.13)\n', 1),
@@ -36,6 +48,11 @@ PATCHES = [
     ("setup.py", 'extra_compile_args=["-fPIC", "-DNOBLAS"]', 'extra_compile_args=["-fPIC", "-DNOBLAS", "-std=c++14"]', 2),
     ("pyEdgeEval/utils/distance_transforms.py", "from scipy.ndimage.morphology import distance_transform_edt",
      "from scipy.ndimage import distance_transform_edt", 1),
+    # headers that use the C/C++ standard library without including it (newer libstdc++ no longer
+    # includes these transitively)
+    ("pyEdgeEval/_lib/include/Matrix.hh", "#define __Matrix_hh__\n",
+     "#define __Matrix_hh__\n#include <cstdlib>  // patched\n#include <cmath>  // patched\n", 1),
+    ("pyEdgeEval/_lib/include/csa_defs.h", "#define\tTRUE\t1\n", "#include <cmath>  // patched\n#define\tTRUE\t1\n", 1),
 ]
 
 SELF_TEST = r'''
@@ -60,11 +77,33 @@ print("pyEdgeEval self-test passed")
 '''
 
 
-def self_test():
-    r = subprocess.run([sys.executable, "-c", SELF_TEST], capture_output=True, text=True)
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def self_test(python=None):
+    r = run([python or sys.executable, "-c", SELF_TEST])
     return r.returncode == 0, (r.stdout + r.stderr).strip()
 
 
+def recorded_scorer():
+    try:
+        py = json.loads(MARKER.read_text())["python"]
+        return py if Path(py).exists() else None
+    except Exception:
+        return None
+
+
+def record_scorer(python):
+    MARKER.parent.mkdir(parents=True, exist_ok=True)
+    MARKER.write_text(json.dumps({"python": str(python), "pyEdgeEval": VERSION}))
+
+
+def forget_scorer():
+    MARKER.unlink(missing_ok=True)
+
+
+# ------------------------------------------------------------------ step 2: compile
 def patch_tree(root):
     root = Path(root)
     for rel, old, new, min_count in PATCHES:
@@ -86,36 +125,123 @@ def download(dest):
     Path(dest).write_bytes(data)
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--workdir", default=None)
-    p.add_argument("--force", action="store_true", help="reinstall even if a working copy is present")
-    args = p.parse_args()
-    if not args.force:
-        ok, out = self_test()
-        if ok:
-            print("pyEdgeEval already installed and working")
-            return
-    work = Path(args.workdir or tempfile.mkdtemp(prefix="pyedgeeval_"))
-    work.mkdir(parents=True, exist_ok=True)
+def build_diagnostics():
+    lines = []
+    for exe in ("gcc", "g++", "cc", "c++"):
+        p = shutil.which(exe)
+        if p:
+            v = run([p, "--version"]).stdout.splitlines()
+            lines.append(f"{exe}: {v[0] if v else p}")
+        else:
+            lines.append(f"{exe}: NOT FOUND")
+    inc = sysconfig.get_paths().get("include", "")
+    lines.append(f"Python.h: {'found' if Path(inc, 'Python.h').exists() else 'NOT FOUND'} ({inc})")
+    return lines
+
+
+def compile_errors(log):
+    errs = [l for l in log.splitlines() if re.search(r"(fatal )?error:|Error:|No such file", l)]
+    seen, out = set(), []
+    for l in errs:
+        if l not in seen:
+            seen.add(l)
+            out.append(l)
+    return out[:40] or log.splitlines()[-60:]
+
+
+def try_compile(workdir):
+    work = Path(workdir)
     tgz = work / f"pyedgeeval-{VERSION}.tar.gz"
-    print(f"downloading pyEdgeEval {VERSION} source ...", flush=True)
+    print(f"[compile] downloading pyEdgeEval {VERSION} source ...", flush=True)
     download(tgz)
     with tarfile.open(tgz) as tf:
         tf.extractall(work, filter="data") if sys.version_info >= (3, 12) else tf.extractall(work)
     src = work / f"pyedgeeval-{VERSION}"
     patch_tree(src)
-    print("building and installing (compiles C++, about 1-2 minutes) ...", flush=True)
-    r = subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", str(src)],
-                       capture_output=True, text=True)
+    print("[compile] building (about 1-2 minutes) ...", flush=True)
+    r = run([sys.executable, "-m", "pip", "install", "-v", "--no-cache-dir", str(src)])
     if r.returncode != 0:
-        print(r.stdout[-4000:], r.stderr[-4000:])
-        sys.exit("PROBLEM: pyEdgeEval build failed (log above).")
+        print("[compile] build FAILED. Environment:")
+        for l in build_diagnostics():
+            print("   ", l)
+        print("[compile] compiler/build errors:")
+        for l in compile_errors(r.stdout + "\n" + r.stderr):
+            print("   ", l[:300])
+        return False
     ok, out = self_test()
-    print(out)
+    print("[compile]", out.splitlines()[-1] if out else "")
+    return ok
+
+
+# ------------------------------------------------------------------ step 3: prebuilt wheel in Python 3.8
+def uv_cmd():
+    if shutil.which("uv"):
+        return [shutil.which("uv")]
+    r = run([sys.executable, "-m", "pip", "install", "-q", "uv"])
+    if r.returncode != 0:
+        raise RuntimeError("could not install uv: " + r.stderr[-500:])
+    return [sys.executable, "-m", "uv"]
+
+
+def setup_py38():
+    uv = uv_cmd()
+    py = PY38_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not py.exists():
+        print(f"[py38] creating a Python 3.8 environment in {PY38_DIR} (uv downloads Python 3.8) ...", flush=True)
+        r = run(uv + ["venv", "--python", "3.8", str(PY38_DIR)])
+        if r.returncode != 0:
+            raise RuntimeError("uv could not create a Python 3.8 environment:\n" + (r.stdout + r.stderr)[-1500:])
+    print("[py38] installing the prebuilt pyEdgeEval wheel ...", flush=True)
+    r = run(uv + ["pip", "install", "--python", str(py)] + PY38_PACKAGES)
+    if r.returncode != 0:
+        raise RuntimeError("installing pyEdgeEval into Python 3.8 failed:\n" + (r.stdout + r.stderr)[-1500:])
+    return py
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--mode", choices=["auto", "compile", "py38"], default="auto")
+    p.add_argument("--force", action="store_true", help="redo the installation even if a working scorer exists")
+    p.add_argument("--workdir", default=None)
+    args = p.parse_args()
+
+    if not args.force:
+        ok, _ = self_test()
+        if ok:
+            print("pyEdgeEval already installed and working (this Python)")
+            return
+        py = recorded_scorer()
+        if py and self_test(py)[0]:
+            print(f"pyEdgeEval scorer environment already set up: {py}")
+            return
+
+    if args.mode in ("auto", "compile"):
+        work = Path(args.workdir or tempfile.mkdtemp(prefix="pyedgeeval_"))
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            if try_compile(work):
+                forget_scorer()
+                print("pyEdgeEval self-test passed (compiled for this Python)")
+                return
+        except Exception as e:
+            print(f"[compile] failed: {type(e).__name__}: {e}")
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        if args.mode == "compile":
+            sys.exit("PROBLEM: compiling pyEdgeEval failed (errors above).")
+        print("[compile] did not work; switching to the prebuilt-wheel fallback (no compiler needed)", flush=True)
+
+    try:
+        py = setup_py38()
+    except Exception as e:
+        sys.exit(f"PROBLEM: pyEdgeEval fallback setup failed: {e}")
+    ok, out = self_test(str(py))
+    print("[py38]", out.splitlines()[-1] if out else "")
     if not ok:
-        sys.exit("PROBLEM: pyEdgeEval installed but the self-test failed (output above).")
-    shutil.rmtree(work, ignore_errors=True)
+        print(out[-3000:])
+        sys.exit("PROBLEM: the Python 3.8 scorer environment failed its self-test (output above).")
+    record_scorer(py)
+    print(f"pyEdgeEval self-test passed (prebuilt wheel in {py}); scoring will run there automatically")
 
 
 if __name__ == "__main__":
