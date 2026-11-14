@@ -8,12 +8,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INCLUDE = ["pedger_kd", "data", "teachers", "eval", "bench", "results", "configs", "queues", "notebooks",
-           "tests", "tools", "README.md", "requirements.txt", ".gitignore"]
+           "tests", "tools", "README.md", "requirements.txt", ".gitignore", "CODE_STAMP.json"]
 SKIP_PARTS = {"__pycache__", ".pytest_cache"}
 SKIP_SUFFIX = {".pyc", ".pt", ".pth", ".npy", ".tmp"}
 
 
 def main():
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from pedger_kd.sync import write_stamp
+    print("code stamp:", write_stamp(ROOT)["stamp"])   # newer than HF -> the notebooks may push this copy
     out = ROOT / "dist" / "pedger-mtkd-code.zip"
     out.parent.mkdir(exist_ok=True)
     n = 0

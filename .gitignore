@@ -26,3 +26,6 @@ dist/
 
 # Research documents (Word/PDF reports, not tracked in git)
 docs/
+
+# Code version stamp written by `push-code --stamp` / tools/make_code_zip.py
+CODE_STAMP.json

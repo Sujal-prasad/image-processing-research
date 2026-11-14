@@ -84,10 +84,12 @@ A queue (`queues/*.yaml`) plus a heartbeat lock lets any session on **any Kaggle
    accepted by Hugging Face, must not be read-only, must open the repo, and must **actually write** to it (it
    uploads a tiny `preflight/last_check.json`). If anything fails, the run stops at once with a plain-language fix.
    Check yourself any time with `python -m pedger_kd.preflight`.
-4. **Code:** already on HF under `code/` (the notebooks fetch it from there). After changing code, push it
-   again with `python -m pedger_kd.sync --remote hf:<HF_REPO> push-code`, or upload
-   `dist/pedger-mtkd-code.zip` (`tools/make_code_zip.py`) as a Kaggle Dataset and attach it. An attached copy
-   takes precedence.
+4. **Code:** already on HF under `code/`. Every notebook downloads a fresh copy each time it runs, and the log
+   shows its version (`code from: huggingface | version: <time>`). After changing code, push it from the machine
+   where you edited it with `python -m pedger_kd.sync --remote hf:<HF_REPO> push-code --stamp`, or upload
+   `dist/pedger-mtkd-code.zip` (`tools/make_code_zip.py`) as a Kaggle Dataset and attach it (an attached copy takes
+   precedence). Each copy carries a version stamp (`CODE_STAMP.json`), and an upload is refused if Hugging Face
+   already has the same or a newer version, so an old copy can never overwrite newer code.
 
 ### Running order (each = *Save Version → Save & Run All*; check results in the version's log/output)
 | # | Notebook | Accelerator | Done when |

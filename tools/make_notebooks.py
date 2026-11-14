@@ -33,21 +33,27 @@ except Exception as e:
 os.environ["PEDGER_REMOTE"] = "hf:" + HF_REPO
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "huggingface_hub>=0.25,<2.0", "pyyaml"], check=True)
 W, REPO, WS = "/kaggle/working", "/kaggle/working/pedger-mtkd", "/kaggle/working/ws"
-if not os.path.exists(REPO):
-    attached = sorted(glob.glob("/kaggle/input/*/pedger_kd/__init__.py") + glob.glob("/kaggle/input/*/*/pedger_kd/__init__.py"))
-    if attached:                                   # code uploaded as a Kaggle Dataset (pedger-mtkd-code)
-        shutil.copytree(os.path.dirname(os.path.dirname(attached[0])), REPO)
-        CODE_SOURCE = "kaggle dataset"
-    elif REPO_URL:
-        subprocess.run(["git", "clone", "-q", REPO_URL, REPO], check=True)
-        CODE_SOURCE = "git"
-    else:                                          # copy pushed to Hugging Face by notebook 01
-        from huggingface_hub import snapshot_download
-        snapshot_download(HF_REPO, repo_type="dataset", allow_patterns=["code/*"], local_dir=f"{W}/hf_code",
-                          token=os.environ["HF_TOKEN"])
-        shutil.copytree(f"{W}/hf_code/code", REPO)
-        CODE_SOURCE = "huggingface"
-    print("code from:", CODE_SOURCE)
+# Always start from the newest code: an interactive session can still hold an old copy from an earlier run.
+os.chdir(W)
+shutil.rmtree(REPO, ignore_errors=True)
+shutil.rmtree(f"{W}/hf_code", ignore_errors=True)
+for _m in [m for m in list(sys.modules) if m == "pedger_kd" or m.startswith("pedger_kd.")]:
+    del sys.modules[_m]
+attached = sorted(glob.glob("/kaggle/input/*/pedger_kd/__init__.py") + glob.glob("/kaggle/input/*/*/pedger_kd/__init__.py"))
+if attached:                                       # code uploaded as a Kaggle Dataset (pedger-mtkd-code)
+    shutil.copytree(os.path.dirname(os.path.dirname(attached[0])), REPO)
+    CODE_SOURCE = "kaggle dataset"
+elif REPO_URL:
+    subprocess.run(["git", "clone", "-q", REPO_URL, REPO], check=True)
+    CODE_SOURCE = "git"
+else:                                              # the copy kept on Hugging Face
+    from huggingface_hub import snapshot_download
+    snapshot_download(HF_REPO, repo_type="dataset", allow_patterns=["code/*"], local_dir=f"{W}/hf_code",
+                      token=os.environ["HF_TOKEN"])
+    shutil.copytree(f"{W}/hf_code/code", REPO)
+    CODE_SOURCE = "huggingface"
+_stamp = os.path.join(REPO, "CODE_STAMP.json")
+print("code from:", CODE_SOURCE, "| version:", open(_stamp).read().split('"')[3] if os.path.exists(_stamp) else "unstamped")
 os.chdir(REPO)
 sys.path.insert(0, REPO)
 !python tools/fetch_upstream.py{extra}
@@ -107,7 +113,8 @@ NOTEBOOKS = {
         code(CONFIG),
         code(SETUP.replace("{extra}", "")),
         code(PIP_EVAL),
-        code("""# make the code available to every account through Hugging Face
+        code("""# share the code with every account through Hugging Face: uploads ONLY if this copy is newer than the one
+# already there (e.g. a newer attached code dataset); an older copy is never pushed over a newer one
 !python -m pedger_kd.sync push-code"""),
         code(BSDS_RAW),
         code("""from pedger_kd.sync import open_remote

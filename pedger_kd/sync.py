@@ -18,7 +18,7 @@ CLI (from a laptop or a notebook):
     python -m pedger_kd.sync --remote hf:you/pedger-store status
     python -m pedger_kd.sync --remote hf:you/pedger-store push-dir --local data_store/bsds --to data/bsds
     python -m pedger_kd.sync --remote hf:you/pedger-store pull --prefix runs/A_agree_s0 --ws /kaggle/working/ws
-    python -m pedger_kd.sync --remote hf:you/pedger-store push-code
+    python -m pedger_kd.sync --remote hf:you/pedger-store push-code --stamp   # where the code is edited
     python -m pedger_kd.sync --remote hf:you/pedger-store squash      # drop old checkpoint versions
 """
 import argparse
@@ -249,11 +249,51 @@ class AsyncPusher:
             return self._pending is None and not self._busy
 
 
-def push_code(remote, repo_root=ROOT):
+STAMP_FILE = "CODE_STAMP.json"
+
+
+def write_stamp(repo_root=ROOT):
+    """Mark this copy of the code as the newest version. Done only where the code is edited
+    (`push-code --stamp`, tools/make_code_zip.py), never in a notebook."""
+    import subprocess
+    try:
+        git = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo_root, capture_output=True,
+                             text=True, timeout=10).stdout.strip() or "unknown"
+    except Exception:
+        git = "unknown"
+    stamp = {"stamp": iso(), "git": git}
+    (Path(repo_root) / STAMP_FILE).write_text(json.dumps(stamp, indent=2))
+    return stamp
+
+
+def read_stamp(repo_root=ROOT):
+    p = Path(repo_root) / STAMP_FILE
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def push_code(remote, repo_root=ROOT, stamp=False, force=False):
+    """Upload the code to <remote>/code, but never replace newer code with an older copy.
+
+    Each pushed copy carries CODE_STAMP.json. A copy is uploaded only if its stamp is newer than the
+    remote's, so a notebook session holding an old download cannot overwrite a fix pushed meanwhile.
+    """
+    if stamp:
+        write_stamp(repo_root)
+    local = read_stamp(repo_root)
+    remote_stamp = remote.read_json(f"code/{STAMP_FILE}")
+    if not force:
+        if local is None:
+            print(f"not pushing code: this copy has no {STAMP_FILE} (run `push-code --stamp` where the code is edited)")
+            return False
+        if remote_stamp and remote_stamp.get("stamp", "") >= local["stamp"]:
+            print(f"not pushing code: the remote copy ({remote_stamp.get('stamp')}) is the same as or newer than "
+                  f"this one ({local['stamp']})")
+            return False
     ignore = ["third_party/*", "dist/*", "runs/*", "data_store/*", "teacher_cache/*", "outputs/*", "ws/*",
               "*__pycache__*", ".git/*", "*.pt", "*.pth", "*.npy", ".pytest_cache/*", "*.tmp"]
     n = remote.upload_dir(repo_root, "code", ignore=ignore)
-    print(f"pushed {n} code files to {remote.spec}/code")
+    print(f"pushed {n} code files to {remote.spec}/code (stamp {(local or {}).get('stamp')})")
+    return True
 
 
 def status_table(remote):
@@ -273,7 +313,9 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("push-dir"); s.add_argument("--local", required=True); s.add_argument("--to", required=True)
     s = sub.add_parser("pull"); s.add_argument("--prefix", required=True); s.add_argument("--ws", required=True)
-    sub.add_parser("push-code")
+    s = sub.add_parser("push-code")
+    s.add_argument("--stamp", action="store_true", help="mark this copy as newest first (only where the code is edited)")
+    s.add_argument("--force", action="store_true", help="upload even if the remote copy is newer")
     sub.add_parser("status")
     s = sub.add_parser("ls"); s.add_argument("--prefix", default="")
     sub.add_parser("squash")
@@ -287,7 +329,7 @@ def main():
     elif args.cmd == "pull":
         print(f"pulled {remote.download(args.prefix, args.ws)} files from {args.prefix}")
     elif args.cmd == "push-code":
-        push_code(remote)
+        push_code(remote, stamp=args.stamp, force=args.force)
     elif args.cmd == "status":
         status_table(remote)
     elif args.cmd == "ls":
