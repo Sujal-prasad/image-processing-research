@@ -45,7 +45,11 @@ PATCHES = [
     ("setup.py", 'PKG_NAME = "pyEdgeEval"\n', 'PKG_NAME = "pyEdgeEval"\n_INFO = {}  # patched: PEP 667 (Python 3.13)\n', 1),
     ("setup.py", 'exec(compile(f.read(), version_file, "exec"))', 'exec(compile(f.read(), version_file, "exec"), _INFO)', 5),
     ("setup.py", 'return locals()["', 'return _INFO["', 5),
-    ("setup.py", 'extra_compile_args=["-fPIC", "-DNOBLAS"]', 'extra_compile_args=["-fPIC", "-DNOBLAS", "-std=c++14"]', 2),
+    # C++14 mode; and csa.hh calls fprintf(stderr, msg) with a non-literal format, which Ubuntu's
+    # Python build flags turn into an error (-Werror=format-security). These args come after those
+    # flags on the compiler command line, so they win.
+    ("setup.py", 'extra_compile_args=["-fPIC", "-DNOBLAS"]',
+     'extra_compile_args=["-fPIC", "-DNOBLAS", "-std=c++14", "-Wno-error=format-security", "-Wno-format-security"]', 2),
     ("pyEdgeEval/utils/distance_transforms.py", "from scipy.ndimage.morphology import distance_transform_edt",
      "from scipy.ndimage import distance_transform_edt", 1),
     # headers that use the C/C++ standard library without including it (newer libstdc++ no longer
@@ -53,6 +57,8 @@ PATCHES = [
     ("pyEdgeEval/_lib/include/Matrix.hh", "#define __Matrix_hh__\n",
      "#define __Matrix_hh__\n#include <cstdlib>  // patched\n#include <cmath>  // patched\n", 1),
     ("pyEdgeEval/_lib/include/csa_defs.h", "#define\tTRUE\t1\n", "#include <cmath>  // patched\n#define\tTRUE\t1\n", 1),
+    # same output, but with a literal format string (-Werror=format-security)
+    ("pyEdgeEval/_lib/include/csa.hh", "fprintf(stderr,nomem_msg)", 'fprintf(stderr, "%s", nomem_msg)', 4),
 ]
 
 SELF_TEST = r'''
@@ -68,11 +74,20 @@ m1, m2, _, _ = correspond_pixels(a, near, max_dist=0.05)
 assert (m1 > 0).sum() == a.sum() and (m2 > 0).sum() == near.sum(), "near line not matched"
 m1, m2, _, _ = correspond_pixels(a, far, max_dist=0.05)
 assert (m1 > 0).sum() == 0 and (m2 > 0).sum() == 0, "far line wrongly matched"
-pred = a.astype(np.float64)                            # perfect prediction -> precision = recall = 1
+# Perfect prediction on a BSDS-sized image (321x481, match radius ~4 px): precision and recall ~1.
+# The official matcher is approximate (sparse graph + random outlier links), so it may drop a
+# pixel or so; on a tiny image with a sub-pixel radius it drops more. Allow 1%.
+gt = np.zeros((321, 481), bool); gt[100, 40:440] = True; gt[150:280, 300] = True
 cr, sr, cp, sp = evaluate_boundaries_threshold_multiple_gts(
-    thresholds=np.array([0.5]), pred=pred, gts=[a, a], max_dist=0.0075,
+    thresholds=np.array([0.5]), pred=gt.astype(np.float64), gts=[gt, gt], max_dist=0.0075,
     apply_thinning=True, apply_nms=False)
-assert cr[0] == sr[0] and cp[0] == sp[0] and sp[0] > 0, (cr, sr, cp, sp)
+assert sp[0] > 0 and cp[0] >= 0.99 * sp[0] and cr[0] >= 0.99 * sr[0], ("perfect prediction", cr, sr, cp, sp)
+# A prediction far from every boundary must score ~0
+bad = np.zeros_like(gt); bad[250, 40:200] = True
+cr, sr, cp, sp = evaluate_boundaries_threshold_multiple_gts(
+    thresholds=np.array([0.5]), pred=bad.astype(np.float64), gts=[gt, gt], max_dist=0.0075,
+    apply_thinning=True, apply_nms=False)
+assert cp[0] <= 0.01 * sp[0], ("far prediction matched", cr, sr, cp, sp)
 print("pyEdgeEval self-test passed")
 '''
 

@@ -38,7 +38,7 @@ def find_url():
         exec(compile(f.read(), version_file, "exec"))
     return locals()["__url__"]
 ARGS = [dict(extra_compile_args=["-fPIC", "-DNOBLAS"]), dict(extra_compile_args=["-fPIC", "-DNOBLAS"])]
-print(find_version(), find_author(), ARGS[0]["extra_compile_args"][-1])
+print(find_version(), find_author(), " ".join(ARGS[0]["extra_compile_args"][2:]))
 '''
 
 
@@ -53,6 +53,7 @@ def make_tree(tmp_path):
     inc.mkdir(parents=True)
     (inc / "Matrix.hh").write_text("\n#ifndef __Matrix_hh__\n#define __Matrix_hh__\nclass Matrix {};\n#endif\n")
     (inc / "csa_defs.h").write_text("#define\tTRUE\t1\n#define\tFALSE\t0\n")
+    (inc / "csa.hh").write_text("".join("if (!s) {\n  (void) fprintf(stderr,nomem_msg);\n}\n" for _ in range(4)))
     return tmp_path
 
 
@@ -60,12 +61,14 @@ def test_patched_setup_runs_and_uses_cpp14(tmp_path):
     src = make_tree(tmp_path)
     ip.patch_tree(src)
     out = subprocess.run([sys.executable, "setup.py"], cwd=src, capture_output=True, text=True, check=True).stdout
-    assert out.split() == ["0.2.8", "x", "-std=c++14"]
+    assert out.split() == ["0.2.8", "x", "-std=c++14", "-Wno-error=format-security", "-Wno-format-security"]
     assert "from scipy.ndimage import distance_transform_edt" in \
         (src / "pyEdgeEval/utils/distance_transforms.py").read_text()
     m = (src / "pyEdgeEval/_lib/include/Matrix.hh").read_text()
     assert m.index("#define __Matrix_hh__") < m.index("#include <cstdlib>") < m.index("class Matrix")
     assert (src / "pyEdgeEval/_lib/include/csa_defs.h").read_text().startswith("#include <cmath>")
+    csa = (src / "pyEdgeEval/_lib/include/csa.hh").read_text()
+    assert csa.count('fprintf(stderr, "%s", nomem_msg)') == 4 and "fprintf(stderr,nomem_msg)" not in csa
 
 
 def test_unexpected_source_fails_loudly(tmp_path):
