@@ -73,11 +73,17 @@ A queue (`queues/*.yaml`) plus a heartbeat lock lets any session on **any Kaggle
 1. **Hugging Face:** settings → Access Tokens → *New token*, type **Write**. Delete any token that was shared in
    plain text. The private repo `HF_REPO` is created automatically on first use.
 2. **Each Kaggle account** (phone-verified, so Internet and GPU are available):
-   *Add-ons → Secrets → Add* `HF_TOKEN` = the write token. Kaggle's terms allow one account per person,
-   so use accounts that belong to different team members.
-3. **Notebooks:** on kaggle.com → *Create → Notebook → File → Import notebook*, import each file from
+   *Add-ons → Secrets → Add* `HF_TOKEN` = a **Write** token from the Hugging Face account that **owns** `HF_REPO`
+   (every Kaggle account uses a token from that same HF account; a teammate's own HF token cannot open the
+   private repo). Kaggle's terms allow one account per person, so use accounts that belong to different team members.
+3. **Notebooks:** on kaggle.com → *Create → Notebook → File → Import notebook*, one file at a time from
    `notebooks/`. In each: tick the `HF_TOKEN` secret (Add-ons → Secrets), *Settings → Internet: On*,
-   accelerator as written in the notebook title. Only the first cell has settings (`HF_REPO`, `ACCOUNT`).
+   accelerator as written in the notebook title. Nothing in the first cell needs to change between accounts;
+   `ACCOUNT` is an optional label (sessions are told apart automatically).
+   **Preflight:** every notebook starts by checking the session type, GPUs, internet, and the token: it must be
+   accepted by Hugging Face, must not be read-only, must open the repo, and must **actually write** to it (it
+   uploads a tiny `preflight/last_check.json`). If anything fails, the run stops at once with a plain-language fix.
+   Check yourself any time with `python -m pedger_kd.preflight`.
 4. **Code:** already on HF under `code/` (the notebooks fetch it from there). After changing code, push it
    again with `python -m pedger_kd.sync --remote hf:<HF_REPO> push-code`, or upload
    `dist/pedger-mtkd-code.zip` (`tools/make_code_zip.py`) as a Kaggle Dataset and attach it. An attached copy
@@ -124,7 +130,7 @@ tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks
 ```
 python tools/fetch_upstream.py          # official PEdger at the pinned commit
 pip install -r requirements.txt
-pytest tests                            # 74 tests, CPU, ~4 minutes
+pytest tests                            # 82 tests, CPU, ~5 minutes
 ```
 `pyEdgeEval` builds a C++ extension. It installs out of the box on Kaggle/Linux; on Windows it needs
 the MSVC build tools. Everything except benchmark scoring runs without it.

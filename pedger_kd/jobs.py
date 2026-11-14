@@ -57,6 +57,14 @@ def load_queue(path):
     return jobs
 
 
+def make_worker_id(label, dev):
+    """Unique per worker process, even when every account uses the same label and the fresh Kaggle
+    containers hand out identical process ids: the lock compares these ids, so a collision would let two
+    sessions train (and overwrite) the same job."""
+    import secrets
+    return f"{label or 'worker'}@{socket.gethostname()}:{dev}:{secrets.token_hex(3)}"
+
+
 def needed_prefixes(jobs):
     out = set()
     for j in jobs:
@@ -203,12 +211,18 @@ def main():
 
     if args.worker_gpu is not None:      # child process: one worker on one GPU
         dev = "cpu" if args.worker_gpu == "cpu" else f"gpu{args.worker_gpu}"
-        wid = f"{args.label or socket.gethostname()}:{dev}:{os.getpid()}"
+        wid = make_worker_id(args.label, dev)
         summary = Worker(remote, ws, wid, deadline, args.data_root, args.teacher_root, args.stale_minutes,
                          args.ckpt_minutes, args.settle_seconds, args.take_over, args.retry_failed).run(jobs)
         print(f"[{wid}] summary: {json.dumps(summary)}", flush=True)
         return
 
+    if remote.spec.startswith("hf:"):     # same checks as `python -m pedger_kd.preflight`, before any work
+        from .preflight import hf_check, kaggle_run_type
+        ok, user, msg = hf_check(remote.spec)
+        print(f"session: {kaggle_run_type()} | Hugging Face user: {user} | {msg}", flush=True)
+        if not ok:
+            sys.exit(f"PROBLEM: {msg}")
     print(f"queue {args.queue}: {len(jobs)} jobs; remote {remote.spec}; "
           f"session ends in {(deadline - time.time()) / 3600:.2f} h", flush=True)
     for prefix in needed_prefixes(jobs):
@@ -236,6 +250,9 @@ def main():
             gpus = []
     else:
         gpus = [g for g in args.gpus.split(",") if g != ""]
+    if not gpus and os.path.exists("/kaggle") and args.gpus != "none":
+        sys.exit("PROBLEM: no GPU in this Kaggle session. Settings -> Accelerator -> GPU T4 x2, then run again "
+                 "(training on CPU would use the whole session and finish nothing).")
     gpus = gpus or ["cpu"]
     print(f"workers: {gpus}", flush=True)
 

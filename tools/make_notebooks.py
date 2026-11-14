@@ -12,18 +12,24 @@ from pathlib import Path
 
 NB = Path(__file__).resolve().parents[1] / "notebooks"
 
-CONFIG = """# ==== EDIT ONLY THIS CELL (keep the same values on every Kaggle account) ====
-HF_REPO = "sujalprasad90/pedger-mtkd-store"   # private Hugging Face dataset repo; created automatically
-ACCOUNT = "account-1"                         # any label; recorded in progress.json (who trained what)
+CONFIG = """# ==== SETTINGS (nothing here needs to change between Kaggle accounts) ====
+HF_REPO = "sujalprasad90/pedger-mtkd-store"   # the ONE private Hugging Face repo shared by every account
+ACCOUNT = ""                                  # optional label, e.g. your name; sessions are told apart automatically
 REPO_URL = ""                                 # optional GitHub URL of the code ("" = Kaggle dataset or HF copy)
-# Kaggle setup (once per account): Add-ons -> Secrets -> add HF_TOKEN (a WRITE token) and tick it for this
-# notebook; Settings -> Internet ON; Settings -> Accelerator as noted in the title."""
+# Once per Kaggle account, and for every imported notebook:
+#   Add-ons -> Secrets -> HF_TOKEN = a WRITE token from the Hugging Face account that owns HF_REPO, ticked for this notebook
+#   Settings -> Internet: On;  Settings -> Accelerator: as written in the title
+# The preflight cell below checks all of this and stops with a plain-language fix if something is missing."""
 
 SETUP = """# ---- setup: secrets, code, dependencies (no edits needed) ----
 import glob, os, shutil, subprocess, sys, time
 SESSION_START = time.time()
 from kaggle_secrets import UserSecretsClient
-os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
+try:
+    os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
+except Exception as e:
+    raise RuntimeError("Secret HF_TOKEN is not available: Add-ons -> Secrets -> add HF_TOKEN and tick it for THIS "
+                       "notebook, then run again.") from e
 os.environ["PEDGER_REMOTE"] = "hf:" + HF_REPO
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "huggingface_hub>=0.25", "pyyaml"], check=True)
 W, REPO, WS = "/kaggle/working", "/kaggle/working/pedger-mtkd", "/kaggle/working/ws"
@@ -44,7 +50,10 @@ if not os.path.exists(REPO):
     print("code from:", CODE_SOURCE)
 os.chdir(REPO)
 sys.path.insert(0, REPO)
-!python tools/fetch_upstream.py{extra}"""
+!python tools/fetch_upstream.py{extra}
+# preflight: session type, GPUs, internet, Hugging Face account and repo access
+if subprocess.run([sys.executable, "-m", "pedger_kd.preflight"]).returncode:
+    raise RuntimeError("Preflight failed: fix the PROBLEM lines printed above, then run the notebook again.")"""
 
 PIP_EVAL = """!pip install -q -r requirements.txt   # includes pyEdgeEval (benchmark), builds in ~1-2 min"""
 
@@ -227,7 +236,7 @@ else:
     remote.download("timing", W)
 !cat {W}/timing/baseline.json"""),
         code("""HOURS = 11.25            # whole-session budget (Kaggle stops GPU sessions at 12 h)
-!python -m pedger_kd.jobs --queue queues/checks.yaml --ws {WS} --hours {HOURS} --session-start {SESSION_START} --gpus auto --label {ACCOUNT}"""),
+!python -m pedger_kd.jobs --queue queues/checks.yaml --ws {WS} --hours {HOURS} --session-start {SESSION_START} --gpus auto --label '{ACCOUNT}'"""),
         code(STATUS),
         code(CLEANUP),
     ]),
@@ -246,7 +255,7 @@ Queues: `queues/main.yaml` (main rows, seeds 0→1→2), `queues/ablations.yaml`
 HOURS = 11.25            # whole-session budget, counted from the first cell (Kaggle limit: 12 h)"""),
         code(SETUP.replace("{extra}", "")),
         code(STATUS),
-        code("""!python -m pedger_kd.jobs --queue {QUEUE} --ws {WS} --hours {HOURS} --session-start {SESSION_START} --gpus auto --label {ACCOUNT} --squash"""),
+        code("""!python -m pedger_kd.jobs --queue {QUEUE} --ws {WS} --hours {HOURS} --session-start {SESSION_START} --gpus auto --label '{ACCOUNT}' --squash"""),
         code(STATUS),
         code(CLEANUP),
     ]),
