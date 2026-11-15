@@ -82,7 +82,7 @@ def main():
                     f"{'reproduces ' + ' / '.join(m) if m else '-'}")
     lines = ["released PEdger checkpoint, BSDS500 test (200 images)"] + rows + [
         "published (ODS/OIS): " + "   ".join(f"{k} .{round(o * 1000)}/.{round(i * 1000)}" for k, (o, i) in PUBLISHED.items())
-        + f"   (gate: both within ±{TOL})"]
+        + f"   (gate: both within +/-{TOL})"]
     if deploy:
         lines.append(f"GATE PASSED: mode {deploy} reproduces the paper -> eval.deploy: {deploy} in configs/base.yaml")
     elif not [n for n, ms in pending if not ms]:

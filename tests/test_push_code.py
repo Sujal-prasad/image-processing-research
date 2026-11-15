@@ -32,6 +32,22 @@ def test_unstamped_copy_is_refused_unless_forced(tmp_path):
     assert push_code(remote, repo_root=unstamped, force=True)
 
 
+def test_only_code_is_uploaded_and_stray_files_are_removed(tmp_path):
+    remote = LocalRemote(tmp_path / "remote")
+    stray = remote.root / "code" / "docs" / "Proposal.docx"            # left by an older upload
+    stray.parent.mkdir(parents=True)
+    stray.write_text("private")
+    dev = make_repo(tmp_path / "dev", "v1", stamp="2026-11-15T10:00:00+00:00")
+    (dev / "docs").mkdir()
+    (dev / "docs" / "Research_Report.docx").write_text("private")
+    (dev / "pedger_kd").mkdir()
+    (dev / "pedger_kd" / "x.py").write_text("print(1)")
+    (dev / "pedger_kd" / "~$lock.docx").write_text("lock")
+    (dev / "notes.txt").write_text("private")
+    assert push_code(remote, repo_root=dev)
+    assert sorted(remote.list("code")) == ["code/CODE_STAMP.json", "code/pedger_kd/x.py", "code/requirements.txt"]
+
+
 def test_stamp_marks_the_editing_machine_copy_as_newest(tmp_path):
     remote = LocalRemote(tmp_path / "remote")
     dev = make_repo(tmp_path / "dev", "v1", stamp="2020-01-01T00:00:00+00:00")

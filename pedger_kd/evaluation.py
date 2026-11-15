@@ -211,6 +211,7 @@ def score_here(pred_dir, items, max_dist=0.0075, thresholds=99, nproc=1, apply_n
                if s["name"] in cached and cached[s["name"]][0] == s["md5"]}   # changed predictions are redone
     todo = [s for s in samples if s["name"] not in results]
     total = len(samples)
+    nproc = max(1, min(int(nproc), len(todo)))
     print(f"scoring {total} images: {len(results)} already done earlier, {len(todo)} to go, "
           f"{nproc} process(es); a progress line follows every ~5%", flush=True)
     stopped = deadline is not None and time.time() > deadline and bool(todo)

@@ -83,14 +83,16 @@ class LocalRemote:
             n += 1
         return n
 
-    def upload(self, files, message=""):
-        """files: {remote_path: local_path}"""
+    def upload(self, files, message="", delete=()):
+        """files: {remote_path: local_path}; delete: remote paths to remove."""
         for rp, lp in files.items():
             dst = self.root / rp
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = dst.with_name(dst.name + ".tmp")
             shutil.copy2(lp, tmp)
             os.replace(tmp, dst)
+        for rp in delete:
+            (self.root / rp).unlink(missing_ok=True)
 
     def upload_dir(self, local_dir, remote_prefix, ignore=()):
         files = {}
@@ -155,9 +157,11 @@ class HubRemote:
                                               local_dir=str(ws)), "download")
         return len(files)
 
-    def upload(self, files, message="update"):
-        from huggingface_hub import CommitOperationAdd
+    def upload(self, files, message="update", delete=()):
+        """files: {remote_path: local_path}; delete: remote paths to remove (same commit)."""
+        from huggingface_hub import CommitOperationAdd, CommitOperationDelete
         ops = [CommitOperationAdd(path_in_repo=rp, path_or_fileobj=str(lp)) for rp, lp in files.items()]
+        ops += [CommitOperationDelete(path_in_repo=rp) for rp in delete]
         self._retry(lambda: self.api.create_commit(self.repo_id, operations=ops, commit_message=message,
                                                    repo_type="dataset"), "upload")
 
@@ -250,6 +254,26 @@ class AsyncPusher:
 
 
 STAMP_FILE = "CODE_STAMP.json"
+# What counts as "the code" (an allowlist: documents, data and anything else in the folder stay private)
+CODE_INCLUDE = ["pedger_kd", "data", "teachers", "eval", "bench", "results", "configs", "queues", "notebooks",
+                "tests", "tools", "README.md", "LICENSE", "requirements.txt", ".gitignore", STAMP_FILE]
+_SKIP_PARTS = {"__pycache__", ".pytest_cache"}
+_SKIP_SUFFIX = {".pyc", ".pt", ".pth", ".npy", ".tmp"}
+
+
+def code_files(repo_root=ROOT):
+    """{relative posix path: Path} of every code file (CODE_INCLUDE minus caches, weights and lock files)."""
+    root = Path(repo_root)
+    out = {}
+    for item in CODE_INCLUDE:
+        p = root / item
+        paths = [p] if p.is_file() else (sorted(q for q in p.rglob("*") if q.is_file()) if p.is_dir() else [])
+        for q in paths:
+            rel = q.relative_to(root)
+            if _SKIP_PARTS & set(rel.parts) or q.suffix in _SKIP_SUFFIX or q.name.startswith("~$"):
+                continue
+            out[rel.as_posix()] = q
+    return out
 
 
 def write_stamp(repo_root=ROOT):
@@ -289,10 +313,11 @@ def push_code(remote, repo_root=ROOT, stamp=False, force=False):
             print(f"not pushing code: the remote copy ({remote_stamp.get('stamp')}) is the same as or newer than "
                   f"this one ({local['stamp']})")
             return False
-    ignore = ["third_party/*", "dist/*", "runs/*", "data_store/*", "teacher_cache/*", "outputs/*", "ws/*",
-              "*__pycache__*", ".git/*", "*.pt", "*.pth", "*.npy", ".pytest_cache/*", "*.tmp"]
-    n = remote.upload_dir(repo_root, "code", ignore=ignore)
-    print(f"pushed {n} code files to {remote.spec}/code (stamp {(local or {}).get('stamp')})")
+    files = {f"code/{rel}": str(p) for rel, p in code_files(repo_root).items()}
+    stale = [f for f in remote.list("code") if f not in files]      # removed or never meant to be there
+    remote.upload(files, f"code {(local or {}).get('stamp')}", delete=stale)
+    print(f"pushed {len(files)} code files to {remote.spec}/code (stamp {(local or {}).get('stamp')})"
+          + (f"; removed {len(stale)} old file(s)" if stale else ""))
     return True
 
 
