@@ -24,6 +24,7 @@ REPO_URL = ""                                 # optional GitHub URL of the code 
 SETUP = """# ---- setup: secrets, code, dependencies (no edits needed) ----
 import glob, os, shutil, subprocess, sys, time
 SESSION_START = time.time()
+os.environ["PEDGER_SESSION_START"] = str(SESSION_START)   # long steps stop and save before Kaggle's 12-hour limit
 from kaggle_secrets import UserSecretsClient
 try:
     os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
@@ -108,7 +109,9 @@ NOTEBOOKS = {
 * builds the BSDS500 array store (agreement maps from the per-annotator ground truth) and uploads it to HF
 * copies the code to HF so other accounts don't need the Kaggle code dataset
 * **step 1 gate:** scores the released PEdger checkpoint in every inference mode; one of them should
-  reproduce the published ODS within ±0.002 (.821/.840 BSDS+VOC or .813/.834 BSDS-only)
+  reproduce the published ODS within ±0.002 (.821/.840 BSDS+VOC or .813/.834 BSDS-only).
+  Scoring takes ~4 h per mode on CPU, so this may need two or three runs of this notebook: each run
+  continues where the previous one stopped (progress is kept on Hugging Face).
 """),
         code(CONFIG),
         code(SETUP.replace("{extra}", "")),
@@ -129,20 +132,14 @@ else:
         code("""# step 3 visual check: image | annotator fraction a | label Y | trust alpha
 !python data/visualize_samples.py --store {WS}/data/bsds --split train --n 10 --out {W}/checks/agreement.png
 from IPython.display import Image, display; display(Image(f"{W}/checks/agreement.png"))"""),
-        code("""# step 1: released PEdger checkpoint, every inference mode, SS and MS
-CKPT = "third_party/PEdger/checkpoint_PEdger.pth"
-for mode in ["ns_m", "rec_m", "fuse_m"]:
-    for ms in ["", "--ms"]:
-        out = f"{W}/released/{mode}{'_ms' if ms else ''}"
-        !python eval/run_bsds_eval.py --ckpt {CKPT} --mode {mode} {ms} --store {WS}/data/bsds --split test --raw-root {RAW_BSDS} --out-dir {out} --nproc 4 --device cpu
-import json
-rows = []
-for f in sorted(glob.glob(f"{W}/released/*/scores_*.json")):
-    if f.endswith("_per_image.json"): continue
-    r = json.load(open(f)); rows.append(f"{f.split('/')[-2]:10s} ODS {r['ODS']:.4f}  OIS {r['OIS']:.4f}  AP {r['AP']:.4f}")
-open(f"{W}/released_scores.txt", "w").write("\\n".join(rows) + "\\n")
-print("\\n".join(rows)); print("published: .821/.840 (BSDS+VOC)   .813/.834 (BSDS only)")
-!python -m pedger_kd.sync push-dir --local {W}/released --to results/released"""),
+        code("""# step 1 gate: score the released PEdger checkpoint (single-scale for every mode first; multi-scale if MS=True).
+# Scoring is slow on CPU (~4 h per mode for the 200 test images). Progress is saved to Hugging Face every
+# 10 minutes and the run stops before Kaggle's 12-hour limit: just run the notebook again to continue.
+# Modes already scored (in any session or account) are skipped. The table at the end compares with the paper.
+MODES = ["ns_m", "rec_m", "fuse_m"]
+MS = False
+_modes, _ms = " ".join(MODES), ("--ms" if MS else "")
+!python eval/released_gate.py --store {WS}/data/bsds --raw-root {RAW_BSDS} --modes {_modes} {_ms} --out {W}/released --device cpu"""),
         code("""# step 9 part 1: numeric BatchNorm check on the released weights
 !python eval/bn_check.py --numeric --ckpt third_party/PEdger/checkpoint_PEdger.pth --device cpu"""),
         code(CLEANUP),

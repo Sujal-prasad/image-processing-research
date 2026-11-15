@@ -1,12 +1,13 @@
-"""Run pedger_kd.evaluation.evaluate() inside the separate scorer interpreter (see tools/install_pyedgeeval.py).
+"""Scoring worker: runs pedger_kd.evaluation.score_here() in a fresh process (started by evaluate()).
 
     python -m pedger_kd.score_worker spec.json out.json
-Must stay compatible with Python 3.8 and must not import torch.
+It runs under this Python, or under the separate Python 3.8 scorer environment
+(see tools/install_pyedgeeval.py). Must stay compatible with Python 3.8 and must not import torch.
 """
 import json
 import sys
 
-from pedger_kd.evaluation import evaluate
+from pedger_kd.evaluation import score_here
 
 
 def plain(x):
@@ -24,9 +25,9 @@ def main():
     spec_path, out_path = sys.argv[1], sys.argv[2]
     with open(spec_path) as f:
         spec = json.load(f)
-    scores, per_sample, curve = evaluate(**spec)
+    res = score_here(**spec)
     with open(out_path, "w") as f:
-        json.dump(plain({"scores": scores, "per_sample": per_sample, "curve": curve}), f)
+        json.dump(plain(res), f)
 
 
 if __name__ == "__main__":

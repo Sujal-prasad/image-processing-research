@@ -23,6 +23,7 @@ from pedger_kd.config import load_config  # noqa: E402
 from pedger_kd.sync import open_remote  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+STOPPED_FOR_TIME = 3          # exit code of run_bsds_eval.py when the Kaggle session is nearly over
 
 
 def main():
@@ -32,7 +33,7 @@ def main():
     p.add_argument("--raw-root", action="append", required=True, help="dataset=path, e.g. bsds=/.../BSDS500/data")
     p.add_argument("--runs", default="*", help="glob on run names")
     p.add_argument("--ms", action="store_true")
-    p.add_argument("--nproc", type=int, default=4)
+    p.add_argument("--nproc", type=int, default=0, help="scoring processes (0 = number of CPUs)")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
     remote = open_remote(args.remote)
@@ -62,20 +63,20 @@ def main():
             continue
         for f in ("final.pt", "done.json"):
             remote.download(f"runs/{run}/{f}", ws)
+        # run_bsds_eval uploads predictions, scoring progress and scores to runs/<run>/ itself and resumes
+        # from there, so a session that runs out of time loses at most ~10 minutes of scoring
         cmd = [sys.executable, str(ROOT / "eval" / "run_bsds_eval.py"), "--run", str(ws / "runs" / run),
                "--store", str(ws / "data" / store), "--split", split, "--raw-root", raw[root_key],
-               "--nproc", str(args.nproc), "--device", args.device] + (["--ms"] if args.ms else [])
+               "--nproc", str(args.nproc), "--device", args.device,
+               "--remote", args.remote, "--sync-to", f"runs/{run}"] + (["--ms"] if args.ms else [])
         print(f"=== {run}: {split}{' MS' if args.ms else ''}", flush=True)
-        if subprocess.run(cmd).returncode != 0:
+        rc = subprocess.run(cmd).returncode
+        if rc == STOPPED_FOR_TIME:
+            print("Session time is nearly up: progress is saved. Run this notebook again to continue.")
+            break
+        if rc != 0:
             print(f"FAILED {run}")
             continue
-        run_dir = ws / "runs" / run
-        up = {f"runs/{run}/scores_{tag}.json": str(run_dir / f"scores_{tag}.json"),
-              f"runs/{run}/scores_{tag}_per_image.json": str(run_dir / f"scores_{tag}_per_image.json")}
-        if split == "test":
-            for png in (run_dir / f"pred_{tag}").glob("*.png"):
-                up[f"runs/{run}/pred_{tag}/{png.name}"] = str(png)
-        remote.upload(up, f"scores {run} {tag}")
     # pull every score (also those computed in earlier sessions) for the tables
     for f in remote.list("runs"):
         if "/scores_" in f and f.endswith(".json") and not (ws / f).exists():
