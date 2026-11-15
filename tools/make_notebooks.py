@@ -21,9 +21,19 @@ REPO_URL = ""                                 # optional GitHub URL of the code 
 #   Settings -> Internet: On;  Settings -> Accelerator: as written in the title
 # The preflight cell below checks all of this and stops with a plain-language fix if something is missing."""
 
+SH = '''def sh(cmd, cwd=None):
+    """Run a shell command and show its output; stop the notebook if it fails (a plain `!cmd` carries on)."""
+    print("$", cmd, flush=True)
+    p = subprocess.Popen(cmd, shell=True, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    for raw in p.stdout:                       # progress bars (\\r updates) are shown as their last state
+        print(raw.decode(errors="replace").rstrip("\\r\\n").split("\\r")[-1], flush=True)
+    if p.wait():
+        raise RuntimeError(f"this step failed (exit code {p.returncode}); its error is printed above:\\n  {cmd}")'''
+
 SETUP = """# ---- setup: secrets, code, dependencies (no edits needed) ----
 import glob, os, shutil, subprocess, sys, time
 SESSION_START = time.time()
+""" + SH + """
 os.environ["PEDGER_SESSION_START"] = str(SESSION_START)   # long steps stop and save before Kaggle's 12-hour limit
 from kaggle_secrets import UserSecretsClient
 try:
@@ -57,7 +67,7 @@ _stamp = os.path.join(REPO, "CODE_STAMP.json")
 print("code from:", CODE_SOURCE, "| version:", open(_stamp).read().split('"')[3] if os.path.exists(_stamp) else "unstamped")
 os.chdir(REPO)
 sys.path.insert(0, REPO)
-!python tools/fetch_upstream.py{extra}
+sh("python tools/fetch_upstream.py{extra}")
 # preflight: session type, GPUs, internet, Hugging Face account and repo access
 if subprocess.run([sys.executable, "-m", "pedger_kd.preflight"]).returncode:
     raise RuntimeError("Preflight failed: fix the PROBLEM lines printed above, then run the notebook again.")"""
@@ -169,6 +179,7 @@ Attach the downloaded datasets, **inspect their layout first**, write list files
 Runs SAUGE, MuGE and MEMO once on the 300 BSDS train+val images (plus a flipped pass that softens the
 in-sample maps), packs them, builds the ensembles, and uploads each teacher to HF **as soon as it is done**.
 Teachers already on HF are skipped, so if the session ends early just run it again (any account).
+If a step fails, the run stops right there with the failing command and its error just above it.
 The GPU-hours printed at the end count towards the method's training cost.
 """),
         code(CONFIG),
@@ -183,42 +194,45 @@ def push(t):
     remote.upload({f"teachers/bsds/{SPLIT}/{t}.npy": f"{TC}/{SPLIT}/{t}.npy",
                    f"teachers/bsds/{SPLIT}/{t}.json": f"{TC}/{SPLIT}/{t}.json"}, f"teacher {t}")
 todo = [t for t in ["sauge", "muge", "memo"] if not on_hf(t)]
-print("teachers still to run:", todo)
+print("teachers already on HF:", [t for t in ["sauge", "muge", "memo"] if t not in todo], "| still to run:", todo)
 if todo:
-    !python teachers/export_images.py --store {WS}/data/bsds --split {SPLIT} --out {TW}/img --flip"""),
+    sh(f"python teachers/export_images.py --store {WS}/data/bsds --split {SPLIT} --out {TW}/img --flip")"""),
         code("""if "sauge" in todo:
-    !pip install -q einops
-    !wget -q -nc https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth -P {W}
+    sh("pip install -q einops")
+    sh(f"wget -q -nc https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth -P {W}")
     for sfx in ["", "_flip"]:
-        !python teachers/run_sauge.py --images {TW}/img{sfx} --out {TW}/sauge{sfx} --sam-ckpt {W}/sam_vit_b_01ec64.pth
-    !python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher sauge --pred-dir {TW}/sauge --pred-dir-flip {TW}/sauge_flip --out {TC}
+        sh(f"python teachers/run_sauge.py --images {TW}/img{sfx} --out {TW}/sauge{sfx} --sam-ckpt {W}/sam_vit_b_01ec64.pth")
+    sh(f"python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher sauge --pred-dir {TW}/sauge --pred-dir-flip {TW}/sauge_flip --out {TC}")
     push("sauge")"""),
         code("""if "muge" in todo:
-    !pip install -q efficientnet_pytorch gdown
-    !gdown -q 15NucsEeHAFwo5O2s11pMR1BikoUtiuUX -O {W}/muge_bsds.pth
+    sh("pip install -q efficientnet_pytorch gdown")
+    sh(f"gdown -q 15NucsEeHAFwo5O2s11pMR1BikoUtiuUX -O {W}/muge_bsds.pth")
     for sfx in ["", "_flip"]:
-        !python teachers/run_muge.py --images {TW}/img{sfx} --out {TW}/muge{sfx} --ckpt {W}/muge_bsds.pth
-    !python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher muge --pred-dir {TW}/muge --pred-dir-flip {TW}/muge_flip --out {TC}
+        sh(f"python teachers/run_muge.py --images {TW}/img{sfx} --out {TW}/muge{sfx} --ckpt {W}/muge_bsds.pth")
+    sh(f"python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher muge --pred-dir {TW}/muge --pred-dir-flip {TW}/muge_flip --out {TC}")
     push("muge")"""),
         code("""if "memo" in todo:
-    %cd third_party/MEMO_Edge_Detection
-    !pip install -q -r requirements.txt
-    !python download_checkpoints.py --model bsds-late --model synthetic-late
+    from importlib.metadata import version
+    MEMO = f"{REPO}/third_party/MEMO_Edge_Detection"
+    # Only what MEMO's prediction code imports. Its requirements.txt is unpinned, would replace Kaggle's torch, lists
+    # packages inference never uses (deepspeed, tensorrt, onnxruntime, gradio) and omits peft, which it does import.
+    open(f"{W}/keep_torch.txt", "w").write(f"torch=={version('torch')}\\ntorchvision=={version('torchvision')}\\n")
+    sh(f"pip install -q pytorch_lightning omegaconf diffusers einops peft -c {W}/keep_torch.txt")
+    sh("python download_checkpoints.py --model bsds-late --model synthetic-late", cwd=MEMO)
     for sfx in ["", "_flip"]:
-        !python edge_prediction.py --test_folder {TW}/img{sfx} --save_folder {TW}/memo{sfx} --config_file configs/discrete_BSDS_finetune/binary_lora_default.yaml --model_path pretrained_models/MEMO_BSDS_ft_late/mp_rank_00_model_states.pt --base_model_path pretrained_models/MEMO_synthetic_late/mp_rank_00_model_states.pt --guidance_scale 1.4 --max_steps 20
-    %cd /kaggle/working/pedger-mtkd
-    !python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher memo --pred-dir {TW}/memo/prediction --pred-dir-flip {TW}/memo_flip/prediction --out {TC}
+        sh(f"python edge_prediction.py --test_folder {TW}/img{sfx} --save_folder {TW}/memo{sfx} --config_file configs/discrete_BSDS_finetune/binary_lora_default.yaml --model_path pretrained_models/MEMO_BSDS_ft_late/mp_rank_00_model_states.pt --base_model_path pretrained_models/MEMO_synthetic_late/mp_rank_00_model_states.pt --guidance_scale 1.4 --max_steps 20", cwd=MEMO)
+    sh(f"python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher memo --pred-dir {TW}/memo/prediction --pred-dir-flip {TW}/memo_flip/prediction --out {TC}")
     push("memo")"""),
         code("""# ensembles (trainval) + the same maps cut out for the dev split (train) used by the ablations
 remote.download("teachers/bsds", WS)
 ALL = "sauge muge memo ensemble_mean ensemble_confidence"
 for mode in ["mean", "confidence"]:
-    !python teachers/ensemble.py --teacher-root {TC} --split {SPLIT} --teachers sauge muge memo --mode {mode}
-!python teachers/subset_cache.py --store {WS}/data/bsds --teacher-root {TC} --from trainval --to train --teachers {ALL}
-!python -m pedger_kd.sync push-dir --local {TC} --to teachers/bsds
+    sh(f"python teachers/ensemble.py --teacher-root {TC} --split {SPLIT} --teachers sauge muge memo --mode {mode}")
+sh(f"python teachers/subset_cache.py --store {WS}/data/bsds --teacher-root {TC} --from trainval --to train --teachers {ALL}")
+sh(f"python -m pedger_kd.sync push-dir --local {TC} --to teachers/bsds")
 print(f"teacher caching this session: {(time.time() - SESSION_START) / 3600:.2f} GPU-h")"""),
         code("""# step 6 gate: red = teacher, green = label after the joint augmentation; they must trace the same contours
-!python data/visualize_samples.py --store {WS}/data/bsds --split {SPLIT} --n 8 --teacher-root {TC} --teacher ensemble_mean --augmented --out {W}/checks/aug_align.png
+sh(f"python data/visualize_samples.py --store {WS}/data/bsds --split {SPLIT} --n 8 --teacher-root {TC} --teacher ensemble_mean --augmented --out {W}/checks/aug_align.png")
 from IPython.display import Image, display; display(Image(f"{W}/checks/aug_align.png"))"""),
         code(CLEANUP),
     ]),

@@ -32,6 +32,12 @@ def main():
     names = json.load(open(d / "names.json"))
     transposed = json.load(open(d / "transposed.json"))
     shape = np.load(d / "images.npy", mmap_mode="r").shape[1:3]
+    for folder in filter(None, [args.pred_dir, args.pred_dir_flip]):
+        missing = [n for n in names if not (Path(folder) / f"{n}.png").is_file()]
+        if missing:
+            raise SystemExit(f"{args.teacher}: {len(missing)} of {len(names)} predictions are missing in {folder} "
+                             f"(e.g. {missing[0]}.png): the {args.teacher} step before this did not finish; "
+                             f"its error is in the log above")
     arr = np.zeros((len(names),) + tuple(shape), np.uint8)
     for i, n in enumerate(names):
         prob = load_pred(Path(args.pred_dir) / f"{n}.png")

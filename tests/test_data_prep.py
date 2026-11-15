@@ -79,6 +79,12 @@ def test_prepare_bsds_end_to_end(tmp_path):
     st2 = ArrayStore(store, "trainval", cache, "fake", device="cpu")
     # teacher map must line up with the annotator fraction after re-orientation
     assert torch.allclose(st2.teacher.float() / 255, st2.frac.float(), atol=1 / 255 + 1e-3)
+    # a teacher step that did not finish: packing names the missing predictions
+    (pred / f"{names[-1]}.png").unlink()
+    r = subprocess.run([sys.executable, str(ROOT / "teachers" / "pack_cache.py"), "--store", str(store),
+                        "--split", "trainval", "--teacher", "fake", "--pred-dir", str(pred), "--out", str(cache)],
+                       cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode != 0 and f"1 of {len(names)} predictions are missing" in r.stderr
 
     # step 1 path: predictions from the released PEdger checkpoint (scoring needs pyEdgeEval, on Kaggle)
     ckpt = ROOT / "third_party" / "PEdger" / "checkpoint_PEdger.pth"

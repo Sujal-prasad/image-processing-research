@@ -133,7 +133,7 @@ tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks
 ```
 python tools/fetch_upstream.py          # official PEdger at the pinned commit
 pip install -r requirements.txt
-pytest tests                            # 98 tests, CPU, ~7 minutes
+pytest tests                            # 100 tests, CPU, ~5 minutes
 python tools/install_pyedgeeval.py      # benchmark scorer (only needed for scoring)
 ```
 The benchmark scorer `pyEdgeEval 0.2.8` is not installed with pip directly: its PyPI package fails to build on

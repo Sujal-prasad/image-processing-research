@@ -53,5 +53,5 @@ kd:                           # Variant B (extra loss term)
   w_min: 0.1
 
 eval:
-  deploy: ns_m                # non-recurrent momentum network = the 0.73M model (confirm in step 1)
+  deploy: fuse_m              # fuse_m reproduces BSDS+VOC (step 1 gate)
   output_transform: pedger    # official test.py transform sigmoid(2z - 1)
