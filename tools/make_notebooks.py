@@ -212,17 +212,8 @@ if todo:
     sh(f"python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher muge --pred-dir {TW}/muge --pred-dir-flip {TW}/muge_flip --out {TC}")
     push("muge")"""),
         code("""if "memo" in todo:
-    from importlib.metadata import version
-    MEMO = f"{REPO}/third_party/MEMO_Edge_Detection"
-    # Only what MEMO's prediction code imports. Its requirements.txt is unpinned, would replace Kaggle's torch, lists
-    # packages inference never uses (deepspeed, tensorrt, onnxruntime, gradio) and omits peft, which it does import.
-    open(f"{W}/keep_torch.txt", "w").write(f"torch=={version('torch')}\\ntorchvision=={version('torchvision')}\\n")
-    sh(f"pip install -q pytorch_lightning omegaconf diffusers einops peft -c {W}/keep_torch.txt")
-    sh("python download_checkpoints.py --model bsds-late --model synthetic-late", cwd=MEMO)
-    # MEMO's checkpoints also pickle omegaconf configs, which torch >= 2.6 refuses by default (weights_only=True).
-    # They come from MEMO's official Hugging Face page via its own download script, so allow it for this step only.
-    for sfx in ["", "_flip"]:
-        sh(f"TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 python edge_prediction.py --test_folder {TW}/img{sfx} --save_folder {TW}/memo{sfx} --config_file configs/discrete_BSDS_finetune/binary_lora_default.yaml --model_path pretrained_models/MEMO_BSDS_ft_late/mp_rank_00_model_states.pt --base_model_path pretrained_models/MEMO_synthetic_late/mp_rank_00_model_states.pt --guidance_scale 1.4 --max_steps 20", cwd=MEMO)
+    for sfx in ["", "_flip"]:   # setup + prediction live in the code (teachers/run_memo.py), so fixes need no re-import
+        sh(f"python teachers/run_memo.py --images {TW}/img{sfx} --out {TW}/memo{sfx}")
     sh(f"python teachers/pack_cache.py --store {WS}/data/bsds --split {SPLIT} --teacher memo --pred-dir {TW}/memo/prediction --pred-dir-flip {TW}/memo_flip/prediction --out {TC}")
     push("memo")"""),
         code("""# ensembles (trainval) + the same maps cut out for the dev split (train) used by the ablations

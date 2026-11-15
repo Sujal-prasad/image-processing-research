@@ -35,7 +35,7 @@ SETUP & TRUST           BUILD                 VERIFY                    RUN     
 | 1 Eval setup | `eval/run_bsds_eval.py --ckpt third_party/PEdger/checkpoint_PEdger.pth --mode {ns_m,rec_m,fuse_m} [--ms]` | Released checkpoint reproduces its published ODS within ±0.002 |
 | 2 Data prep | `data/prepare_bsds.py`; `data/prepare_list.py` (NYUDv2, MultiCue); `data/make_multicue_splits.py` | Loaders return correct images and labels (`data/visualize_samples.py`) |
 | 3 Agreement maps | built by step 2 from the per-annotator `.mat` files (0/1/2 px dilation) | Maps look right on 10 images |
-| 4 Teacher cache | `teachers/export_images.py` → `run_sauge.py`, `run_muge.py`, MEMO CLI → `pack_cache.py` → `ensemble.py`; `teacher_gate.py` (NYUD/MultiCue) | Teacher table; teachers not better than PEdger dropped per dataset |
+| 4 Teacher cache | `teachers/export_images.py` → `run_sauge.py`, `run_muge.py`, `run_memo.py` → `pack_cache.py` → `ensemble.py`; `teacher_gate.py` (NYUD/MultiCue) | Teacher table; teachers not better than PEdger dropped per dataset |
 | 5 Joint augmentation | `pedger_kd/augment.py` | `tests/test_augment_align.py` + overlay `visualize_samples.py --augmented` |
 | 6 Variants A + B | `pedger_kd/soft_target.py`, `pedger_kd/kd_loss.py`, `pedger_kd/train_kd.py` | — |
 | 7 **Sanity tests** | `pytest tests` | λ_kd = 0 ≡ baseline; γ = 0, α = 1 − η ≡ PEdger target (both through the real training step) |
@@ -117,7 +117,7 @@ pedger_kd/   upstream.py (loads official PEdger)  norm.py (per-image BN)  augmen
              inference.py  evaluation.py (+ score_worker.py)  session.py (Kaggle 12-h clock)  config.py  teachers.py
 queues/      checks.yaml  main.yaml  ablations.yaml  nyud.yaml  multicue.yaml
 data/        prepare_bsds.py  prepare_list.py  make_multicue_splits.py  visualize_samples.py
-teachers/    export_images.py  run_sauge.py  run_muge.py  pack_cache.py  ensemble.py  subset_cache.py  teacher_gate.py
+teachers/    export_images.py  run_sauge.py  run_muge.py  run_memo.py  pack_cache.py  ensemble.py  subset_cache.py  teacher_gate.py
 eval/        run_bsds_eval.py  released_gate.py (step 1)  eval_runs.py (score all finished runs)  bn_check.py
              agreement_bins.py
 bench/       time_run.py  speed_flops.py
@@ -133,7 +133,7 @@ tools/       fetch_upstream.py (pinned commits)  make_configs.py  make_notebooks
 ```
 python tools/fetch_upstream.py          # official PEdger at the pinned commit
 pip install -r requirements.txt
-pytest tests                            # 100 tests, CPU, ~5 minutes
+pytest tests                            # 101 tests, CPU, ~5 minutes
 python tools/install_pyedgeeval.py      # benchmark scorer (only needed for scoring)
 ```
 The benchmark scorer `pyEdgeEval 0.2.8` is not installed with pip directly: its PyPI package fails to build on
